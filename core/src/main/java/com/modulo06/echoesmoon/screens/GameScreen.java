@@ -29,7 +29,7 @@ public class GameScreen implements Screen {
     private Rectangle player;
     private float playerSpeed = 300f;
 
-    // Timer de sobrevivência (90 segundos para vitória)
+    // Timer de sobrevivência (30 segundos para vitória)
     private float gameTimer = 30.0f;
 
     // Variáveis de Textura (Sprites)
