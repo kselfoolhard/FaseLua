@@ -1,152 +1,105 @@
 package com.modulo06.echoesmoon.screens;
 
-
 import com.badlogic.gdx.Game;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Screen;
-import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.utils.Array;
+import com.modulo06.echoesmoon.entities.Bullet;
+import com.modulo06.echoesmoon.entities.Enemy;
+import com.modulo06.echoesmoon.systems.GameSaveData;
+import com.modulo06.echoesmoon.systems.MissionState;
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.math.Vector3;
 
 public class GameScreen implements Screen {
-
     private Game game;
+    private GameSaveData saveData;
     private OrthographicCamera camera;
     private SpriteBatch batch;
     private ShapeRenderer shapeRenderer;
     private BitmapFont font;
 
-    // --- SPRITES (Coloque os arquivos na pasta 'assets') ---
-    private Texture playerTex, enemyTex, baseTex, portalTex, itemTex, bgTex;
+    private Texture playerTex, baseTex, portalTex, fundoTex, pedraTex, foodTex, o2Tex, itemTex, alienLunarTex, alienChaseTex, bulletTex;
 
-    private final float WORLD_WIDTH = 2000f;
-    private final float WORLD_HEIGHT = 2000f;
+    private final float WORLD_WIDTH = 1200f;
+    private final float WORLD_HEIGHT = 1200f;
 
-    private Rectangle player;
-    private float playerSpeed = 300f;
-    private float gameTimer = 300.0f;
-
-    // Status
-    private float o2 = 100f, maxO2 = 100f, o2ConsumptionRate = 3f;
-    private float energy = 100f, maxEnergy = 100f, energyConsumptionRate = 2f;
-    private boolean isDead = false;
-
-    // --- INVENTÁRIO DE MISSÃO ---
-    private boolean hasPartAntenna = false;
-    private boolean hasPartEnergy = false;
-    private boolean hasPartExtractor = false;
-    private boolean hasPartGreenhouse = false;
-    private boolean hasWeaponA = false, hasWeaponB = false, hasWeaponC = false;
-    private boolean hasWeapon = false;
-
-    // --- ESTADOS DA BASE ---
-    private Rectangle base;
-    private boolean isNearBase = false;
-    private boolean repAntenna = false, repEnergy = false, repExtractor = false, repGreenhouse = false;
-
-    // --- PORTAL MARTE ---
-    private Rectangle portal;
-
-    // --- COMBATE ---
-    private boolean isAttacking = false;
-    private float attackTimer = 0f;
-    private Rectangle attackBox;
-
-    class Obstacle {
-        Rectangle rect;
-        public Obstacle(float x, float y, float w, float h) { this.rect = new Rectangle(x, y, w, h); }
-    }
-
-    class Enemy {
-        Rectangle rect; float hp = 100; float speed = 120f;
-        public Enemy(float x, float y) { this.rect = new Rectangle(x, y, 32, 32); }
-    }
-
-    class RepairStation {
-        Rectangle rect; String name; Color color;
-        public RepairStation(float x, float y, String name, Color color) {
-            this.rect = new Rectangle(x, y, 40, 40); this.name = name; this.color = color;
-        }
-    }
-
-    enum ItemType { O2, FOOD, ICE, PART_ANTENNA, PART_ENERGY, PART_EXTRACTOR, PART_GREENHOUSE, WEP_A, WEP_B, WEP_C }
-    class Item {
-        Rectangle rect; ItemType type; boolean collected = false; Color color;
-        public Item(float x, float y, ItemType type) {
-            this.rect = new Rectangle(x, y, 32, 32); this.type = type;
-            if (type == ItemType.O2) color = Color.CYAN;
-            else if (type == ItemType.FOOD) color = Color.GREEN;
-            else if (type.toString().startsWith("PART")) color = Color.YELLOW;
-            else if (type.toString().startsWith("WEP")) color = Color.MAGENTA;
-            else color = Color.WHITE;
-        }
-    }
-
-    private Array<Obstacle> obstacles;
-    private Array<Item> items;
+    private Rectangle player, base, portal, caixaItem;
+    private Array<Rectangle> pedras, comidas, tanquesO2;
     private Array<Enemy> enemies;
-    private Array<RepairStation> stations;
+    private Array<Bullet> bullets;
 
-    public GameScreen(Game game) {
+    private MissionState mission;
+    private float cooldown = 0f;
+    private float saveIndicatorTimer = 0f;
+
+    private float repairProgress = 0f;
+    private final float REPAIR_TIME = 1.5f; // Reduzido para 1.5 segundos
+    private float hordeTimer = 0f;
+
+    public GameScreen(Game game, GameSaveData saveData) {
         this.game = game;
+        this.saveData = (saveData != null) ? saveData : new GameSaveData();
+
         camera = new OrthographicCamera(); camera.setToOrtho(false, 800, 600);
-        batch = new SpriteBatch(); shapeRenderer = new ShapeRenderer(); font = new BitmapFont();
+        batch = new SpriteBatch();
+        shapeRenderer = new ShapeRenderer();
+        font = new BitmapFont();
 
-        player = new Rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, 32, 48);
-        base = new Rectangle(WORLD_WIDTH / 2 - 200, WORLD_HEIGHT / 2 - 100, 200, 150);
+        mission = new MissionState();
+        mission.setEtapaIndex(this.saveData.missaoEtapa);
+
+        player = new Rectangle(this.saveData.playerX, this.saveData.playerY, 32, 48);
+        base = new Rectangle(WORLD_WIDTH / 2 - 100, WORLD_HEIGHT / 2 - 100, 200, 150);
         portal = new Rectangle(WORLD_WIDTH - 150, WORLD_HEIGHT - 150, 100, 100);
-        attackBox = new Rectangle(0, 0, 100, 100);
+        caixaItem = new Rectangle(150, 150, 40, 40);
 
-        // Carregamento dos Sprites
-        playerTex = safeLoadTexture("player_lunar.png");
-        enemyTex = safeLoadTexture("alien_lunar.png");
-        baseTex = safeLoadTexture("base.png");
-        portalTex = safeLoadTexture("portal.png");
-        itemTex = safeLoadTexture("item.png");
-        bgTex = safeLoadTexture("fundo.png");
-
-        obstacles = new Array<>();
-        obstacles.add(new Obstacle(WORLD_WIDTH / 2 + 150, WORLD_HEIGHT / 2 + 150, 100, 80));
-
-        stations = new Array<>();
-        stations.add(new RepairStation(base.x - 50, base.y + 50, "Antena", Color.LIGHT_GRAY));
-        stations.add(new RepairStation(base.x + 220, base.y + 50, "Gerador", Color.YELLOW));
-        stations.add(new RepairStation(base.x + 80, base.y + 170, "Extrator", Color.BLUE));
-        stations.add(new RepairStation(base.x + 80, base.y - 50, "Estufa", Color.LIME));
-
-        enemies = new Array<>();
-        enemies.add(new Enemy(WORLD_WIDTH / 2 + 500, WORLD_HEIGHT / 2 + 300));
-        enemies.add(new Enemy(WORLD_WIDTH / 2 - 500, WORLD_HEIGHT / 2 - 400));
-        enemies.add(new Enemy(WORLD_WIDTH / 2 + 300, WORLD_HEIGHT / 2 - 600));
-
-        items = new Array<>();
-        items.add(new Item(WORLD_WIDTH / 2 + 100, WORLD_HEIGHT / 2 + 300, ItemType.PART_ANTENNA));
-        items.add(new Item(WORLD_WIDTH / 2 - 350, WORLD_HEIGHT / 2 + 50, ItemType.PART_ENERGY));
-        items.add(new Item(WORLD_WIDTH / 2 + 300, WORLD_HEIGHT / 2 - 150, ItemType.PART_EXTRACTOR));
-        items.add(new Item(WORLD_WIDTH / 2 - 100, WORLD_HEIGHT / 2 - 350, ItemType.PART_GREENHOUSE));
-
-        items.add(new Item(WORLD_WIDTH / 2 + 600, WORLD_HEIGHT / 2 + 600, ItemType.WEP_A));
-        items.add(new Item(WORLD_WIDTH / 2 - 600, WORLD_HEIGHT / 2 + 600, ItemType.WEP_B));
-        items.add(new Item(WORLD_WIDTH / 2 - 600, WORLD_HEIGHT / 2 - 600, ItemType.WEP_C));
-
-        items.add(new Item(WORLD_WIDTH / 2 + 200, WORLD_HEIGHT / 2 + 200, ItemType.O2));
-        items.add(new Item(WORLD_WIDTH / 2 - 200, WORLD_HEIGHT / 2 - 200, ItemType.FOOD));
+        bullets = new Array<>();
+        carregarTexturas();
+        gerarMundo();
     }
 
-    private Texture safeLoadTexture(String path) {
-        try {
-            if (Gdx.files.internal(path).exists()) return new Texture(path);
-        } catch (Exception ignored) {}
+    private void carregarTexturas() {
+        playerTex = safeLoad("player_lunar.png");
+        alienLunarTex = safeLoad("alien_lunar.png");
+        alienChaseTex = safeLoad("alien.png");
+        baseTex = safeLoad("base.png");
+        portalTex = safeLoad("portal.png");
+        fundoTex = safeLoad("fundo.png");
+        pedraTex = safeLoad("pedra.png");
+        foodTex = safeLoad("food.png");
+        o2Tex = safeLoad("o2.png");
+        itemTex = safeLoad("item.png");
+        bulletTex = safeLoad("bullet.png");
+    }
+
+    private Texture safeLoad(String path) {
+        try { if (Gdx.files.internal(path).exists()) return new Texture(path); } catch (Exception ignored) {}
         return null;
+    }
+
+    private void gerarMundo() {
+        pedras = new Array<>(); comidas = new Array<>(); tanquesO2 = new Array<>(); enemies = new Array<>();
+
+        pedras.add(new Rectangle(300, 400, 80, 80)); pedras.add(new Rectangle(800, 200, 80, 80));
+        comidas.add(new Rectangle(200, 800, 32, 32)); tanquesO2.add(new Rectangle(400, 200, 32, 32));
+
+        int enemyCount = (mission.getEtapaIndex() >= 3) ? 12 : 7;
+        for (int i = 0; i < enemyCount; i++) {
+            float ex = MathUtils.random(200, WORLD_WIDTH - 200);
+            float ey = MathUtils.random(200, WORLD_HEIGHT - 200);
+            int type = (i % 2 == 0) ? 0 : 1;
+            enemies.add(new Enemy(ex, ey, type));
+        }
     }
 
     @Override
@@ -157,232 +110,231 @@ public class GameScreen implements Screen {
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
         camera.update();
 
-        // 1. FUNDO
         batch.setProjectionMatrix(camera.combined);
         batch.begin();
-        if (bgTex != null) {
-            batch.draw(bgTex, 0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+
+        if (fundoTex != null) batch.draw(fundoTex, 0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+        if (baseTex != null) batch.draw(baseTex, base.x, base.y, base.width, base.height);
+        if (portalTex != null) batch.draw(portalTex, portal.x, portal.y, portal.width, portal.height);
+
+        for (Rectangle p : pedras) if (pedraTex != null) batch.draw(pedraTex, p.x, p.y, p.width, p.height);
+        for (Rectangle c : comidas) if (foodTex != null) batch.draw(foodTex, c.x, c.y, c.width, c.height);
+        for (Rectangle t : tanquesO2) if (o2Tex != null) batch.draw(o2Tex, t.x, t.y, t.width, t.height);
+
+        for (Enemy e : enemies) {
+            if (e.ativo) {
+                Texture texToDraw = (e.type == 0) ? alienLunarTex : alienChaseTex;
+                if (texToDraw != null) batch.draw(texToDraw, e.rect.x, e.rect.y, e.rect.width, e.rect.height);
+            }
         }
+
+        for (Bullet b : bullets) {
+            if (b.active && bulletTex != null) {
+                batch.draw(bulletTex, b.rect.x, b.rect.y, b.rect.width, b.rect.height);
+            }
+        }
+
+        if (!saveData.pecaEstufa && itemTex != null) batch.draw(itemTex, caixaItem.x, caixaItem.y, caixaItem.width, caixaItem.height);
+        if (playerTex != null) batch.draw(playerTex, player.x, player.y, player.width, player.height);
+
         batch.end();
 
-        // 2. RETÂNGULOS (FALLBACK SE NÃO HOUVER SPRITES)
+        // Renderização de ShapeRenderer (Healthbars, barra de progresso e Crosshair do mouse)
         shapeRenderer.setProjectionMatrix(camera.combined);
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
 
-        if (portalTex == null) {
-            shapeRenderer.setColor(Color.PURPLE);
-            shapeRenderer.rect(portal.x, portal.y, portal.width, portal.height);
-        }
+        for (Enemy e : enemies) {
+            if (e.ativo) {
+                float barWidth = 36f;
+                float barHeight = 5f;
+                float barX = e.rect.x;
+                float barY = e.rect.y + e.rect.height + 6;
 
-        shapeRenderer.setColor(Color.DARK_GRAY);
-        for (Obstacle obs : obstacles) shapeRenderer.rect(obs.rect.x, obs.rect.y, obs.rect.width, obs.rect.height);
+                shapeRenderer.setColor(0.8f, 0.1f, 0.1f, 1);
+                shapeRenderer.rect(barX, barY, barWidth, barHeight);
 
-        if (baseTex == null) {
-            shapeRenderer.setColor(Color.NAVY);
-            shapeRenderer.rect(base.x, base.y, base.width, base.height);
-        }
-
-        for(RepairStation s : stations) {
-            shapeRenderer.setColor(s.color);
-            shapeRenderer.rect(s.rect.x, s.rect.y, s.rect.width, s.rect.height);
-        }
-
-        if (itemTex == null) {
-            for (Item item : items) {
-                if (!item.collected) {
-                    shapeRenderer.setColor(item.color);
-                    shapeRenderer.rect(item.rect.x, item.rect.y, item.rect.width, item.rect.height);
-                }
+                float healthRatio = (float) e.hp / e.maxHp;
+                shapeRenderer.setColor(0.1f, 0.9f, 0.1f, 1);
+                shapeRenderer.rect(barX, barY, barWidth * healthRatio, barHeight);
             }
         }
 
-        if (enemyTex == null) {
-            shapeRenderer.setColor(Color.RED);
-            for (Enemy e : enemies) shapeRenderer.rect(e.rect.x, e.rect.y, e.rect.width, e.rect.height);
+        if (!saveData.repEstufa && saveData.pecaEstufa && player.overlaps(base)) {
+            float pWidth = 140f;
+            float pHeight = 12f;
+            float pX = base.x + (base.width - pWidth) / 2;
+            float pY = base.y + base.height + 25;
+
+            shapeRenderer.setColor(0.2f, 0.2f, 0.2f, 1);
+            shapeRenderer.rect(pX, pY, pWidth, pHeight);
+
+            shapeRenderer.setColor(0.2f, 0.8f, 1.0f, 1);
+            float progressRatio = repairProgress / REPAIR_TIME;
+            shapeRenderer.rect(pX, pY, pWidth * progressRatio, pHeight);
         }
 
-        if (playerTex == null) {
-            shapeRenderer.setColor(isDead ? Color.GRAY : Color.ORANGE);
-            shapeRenderer.rect(player.x, player.y, player.width, player.height);
-        }
-
-        if (isAttacking) {
-            shapeRenderer.setColor(new Color(1, 1, 0, 0.5f));
-            shapeRenderer.rect(attackBox.x, attackBox.y, attackBox.width, attackBox.height);
-        }
+        // Desenhar Mira (Crosshair) na posição exata do Mouse no mundo
+        Vector3 mousePos = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+        camera.unproject(mousePos);
+        shapeRenderer.setColor(1f, 1f, 1f, 0.8f);
+        shapeRenderer.rect(mousePos.x - 8, mousePos.y - 1, 16, 2);
+        shapeRenderer.rect(mousePos.x - 1, mousePos.y - 8, 2, 16);
 
         shapeRenderer.end();
 
-        // 3. DESENHO DOS SPRITES DAS ENTIDADES
+        // HUD
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, 1280, 720);
         batch.begin();
-        if (portalTex != null) batch.draw(portalTex, portal.x, portal.y, portal.width, portal.height);
-        if (baseTex != null) batch.draw(baseTex, base.x, base.y, base.width, base.height);
+        font.draw(batch, "O2: " + (int)saveData.o2 + "% | ENERGIA: " + (int)saveData.energia + "%", 30, 690);
+        font.draw(batch, "MISSAO: " + mission.getAtual(), 30, 660);
+        font.draw(batch, "MUNICAO: " + saveData.municao + " | [CLIQUE ESQ] ATIRAR COM MIRA | Segure [E] na Base", 30, 630);
 
-        if (itemTex != null) {
-            for (Item item : items) {
-                if (!item.collected) batch.draw(itemTex, item.rect.x, item.rect.y, item.rect.width, item.rect.height);
-            }
+        if (!saveData.repEstufa && saveData.pecaEstufa && player.overlaps(base)) {
+            font.draw(batch, ">>> MANTENHA [E] PRESSIONADO PARA CONSERTAR A ESTUFA <<<", 400, 350);
         }
 
-        if (enemyTex != null) {
-            for (Enemy e : enemies) batch.draw(enemyTex, e.rect.x, e.rect.y, e.rect.width, e.rect.height);
+        if (saveIndicatorTimer > 0) {
+            font.draw(batch, "[💾 JOGO SALVO COM SUCESSO!]", 1050, 690);
         }
-
-        if (playerTex != null) batch.draw(playerTex, player.x, player.y, player.width, player.height);
-        batch.end();
-
-        // 4. TEXTOS E HUD
-        batch.setProjectionMatrix(camera.combined);
-        batch.begin();
-
-        font.draw(batch, "PORTAL MARTE", portal.x, portal.y - 10);
-        font.draw(batch, "BASE LUNAR (Tecle E p/ Craftar Arma)", base.x, base.y - 10);
-
-        for(RepairStation s : stations) {
-            boolean isRep = false;
-            if(s.name.equals("Antena")) isRep = repAntenna;
-            if(s.name.equals("Gerador")) isRep = repEnergy;
-            if(s.name.equals("Extrator")) isRep = repExtractor;
-            if(s.name.equals("Estufa")) isRep = repGreenhouse;
-
-            String txt = s.name + (isRep ? " [ON]" : " [OFF - Use 'E']");
-            font.draw(batch, txt, s.rect.x - 20, s.rect.y + 60);
-        }
-
-        if (isDead) font.draw(batch, "GAME OVER", player.x, player.y + 50);
-        batch.end();
-
-        // HUD FIXO NA TELA
-        batch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-        batch.begin();
-        font.draw(batch, "FASE 1: LUA | O2: " + (int)o2 + "% | Energia: " + (int)energy + "% | Tempo: " + (int)gameTimer + "s", 10, Gdx.graphics.getHeight() - 10);
-
-        String inv = "Pecas: ";
-        if(hasPartAntenna) inv += "[Antena] ";
-        if(hasPartEnergy) inv += "[Gerador] ";
-        if(hasPartExtractor) inv += "[Extrator] ";
-        if(hasPartGreenhouse) inv += "[Estufa] ";
-        font.draw(batch, inv, 10, Gdx.graphics.getHeight() - 30);
-
-        String armaTxt = "Partes da Arma: " + (hasWeaponA?"A ":"") + (hasWeaponB?"B ":"") + (hasWeaponC?"C ":"");
-        if(hasWeapon) armaTxt = "ARMA EQUIPADA! (Espaco para Atacar)";
-        font.draw(batch, armaTxt, 10, Gdx.graphics.getHeight() - 50);
-
-        String obj = "Objetivo: ";
-        if(!hasWeapon && !repAntenna) obj += "Encontre pecas e conserte a base.";
-        else if (hasWeaponA && hasWeaponB && hasWeaponC && !hasWeapon) obj += "Va para a Base craftar a arma!";
-        else if (repAntenna && repEnergy && repExtractor && repGreenhouse) obj += "Sistemas Online! Portal Liberado!";
-        else obj += "Sobreviva e conserte sistemas.";
-        font.draw(batch, obj, 10, Gdx.graphics.getHeight() - 70);
-
         batch.end();
     }
 
     private void update(float delta) {
-        if (isDead) return;
-        gameTimer -= delta;
-        if (gameTimer <= 0) { isDead = true; return; }
+        if (cooldown > 0f) cooldown -= delta;
+        if (saveIndicatorTimer > 0f) saveIndicatorTimer -= delta;
 
-        float moveX = 0, moveY = 0;
-        if (Gdx.input.isKeyPressed(Input.Keys.A) || Gdx.input.isKeyPressed(Input.Keys.LEFT)) moveX -= playerSpeed * delta;
-        if (Gdx.input.isKeyPressed(Input.Keys.D) || Gdx.input.isKeyPressed(Input.Keys.RIGHT)) moveX += playerSpeed * delta;
-        if (Gdx.input.isKeyPressed(Input.Keys.W) || Gdx.input.isKeyPressed(Input.Keys.UP)) moveY += playerSpeed * delta;
-        if (Gdx.input.isKeyPressed(Input.Keys.S) || Gdx.input.isKeyPressed(Input.Keys.DOWN)) moveY -= playerSpeed * delta;
+        saveData.o2 -= 2f * delta;
+        saveData.energia -= 1.5f * delta;
 
-        player.x += moveX; player.y += moveY;
+        if (saveData.o2 <= 0 || saveData.energia <= 0) {
+            game.setScreen(new GameOverScreen(game));
+            return;
+        }
+
+        if (Gdx.input.isKeyJustPressed(Input.Keys.R)) {
+            saveData.municao = 10;
+        }
+
+        if (mission.getEtapaIndex() < 2) {
+            hordeTimer += delta;
+            if (hordeTimer >= 22f) {
+                hordeTimer = 0f;
+                enemies.add(new Enemy(player.x + MathUtils.random(-200, 200), player.y + MathUtils.random(-200, 200), 1));
+                enemies.add(new Enemy(player.x + MathUtils.random(-200, 200), player.y + MathUtils.random(-200, 200), 0));
+            }
+        }
+
+        float oldX = player.x; float oldY = player.y;
+        if (Gdx.input.isKeyPressed(Input.Keys.A)) player.x -= 300 * delta;
+        if (Gdx.input.isKeyPressed(Input.Keys.D)) player.x += 300 * delta;
+        for (Rectangle p : pedras) if (player.overlaps(p)) player.x = oldX;
+
+        if (Gdx.input.isKeyPressed(Input.Keys.W)) player.y += 300 * delta;
+        if (Gdx.input.isKeyPressed(Input.Keys.S)) player.y -= 300 * delta;
+        for (Rectangle p : pedras) if (player.overlaps(p)) player.y = oldY;
+
         player.x = MathUtils.clamp(player.x, 0, WORLD_WIDTH - player.width);
         player.y = MathUtils.clamp(player.y, 0, WORLD_HEIGHT - player.height);
+        camera.position.set(player.x, player.y, 0);
 
-        camera.position.set(MathUtils.clamp(player.x, camera.viewportWidth / 2f, WORLD_WIDTH - camera.viewportWidth / 2f),
-            MathUtils.clamp(player.y, camera.viewportHeight / 2f, WORLD_HEIGHT - camera.viewportHeight / 2f), 0);
+        for (int i = comidas.size - 1; i >= 0; i--) {
+            if (player.overlaps(comidas.get(i))) { saveData.energia = Math.min(100f, saveData.energia + 30f); comidas.removeIndex(i); }
+        }
+        for (int i = tanquesO2.size - 1; i >= 0; i--) {
+            if (player.overlaps(tanquesO2.get(i))) { saveData.o2 = Math.min(100f, saveData.o2 + 30f); tanquesO2.removeIndex(i); }
+        }
 
-        isNearBase = player.overlaps(base);
-        if (isNearBase) {
-            o2 += 15f * delta; if (o2 > maxO2) o2 = maxO2;
-            energy += 15f * delta; if (energy > maxEnergy) energy = maxEnergy;
+        if (!saveData.pecaEstufa && player.overlaps(caixaItem)) {
+            saveData.pecaEstufa = true;
+            mission.avancarPara(1);
+            salvarProgresso();
+        }
 
-            if (Gdx.input.isKeyJustPressed(Input.Keys.E) && hasWeaponA && hasWeaponB && hasWeaponC && !hasWeapon) {
-                hasWeapon = true;
+        // Reparo rápido com 'E'
+        if (!saveData.repEstufa && saveData.pecaEstufa && player.overlaps(base)) {
+            if (Gdx.input.isKeyPressed(Input.Keys.E)) {
+                repairProgress += delta;
+                if (repairProgress >= REPAIR_TIME) {
+                    saveData.repEstufa = true;
+                    saveData.temArma = true;
+                    mission.avancarPara(2);
+                    salvarProgresso();
+                }
             }
         } else {
-            o2 -= o2ConsumptionRate * delta; energy -= energyConsumptionRate * delta;
-            if (o2 <= 0 || energy <= 0) isDead = true;
+            repairProgress = 0f;
         }
 
-        if (Gdx.input.isKeyJustPressed(Input.Keys.E)) {
-            for(RepairStation s : stations) {
-                if(player.overlaps(s.rect)) {
-                    if(s.name.equals("Antena") && hasPartAntenna) { repAntenna = true; s.color = Color.GREEN; }
-                    if(s.name.equals("Gerador") && hasPartEnergy) { repEnergy = true; s.color = Color.GREEN; }
-                    if(s.name.equals("Extrator") && hasPartExtractor) { repExtractor = true; s.color = Color.GREEN; }
-                    if(s.name.equals("Estufa") && hasPartGreenhouse) { repGreenhouse = true; s.color = Color.GREEN; }
+        Vector2 pPos = new Vector2(player.x, player.y);
+        for (Enemy e : enemies) {
+            e.update(delta, pPos);
+            if (e.ativo && player.overlaps(e.rect)) saveData.o2 -= 12f * delta;
+        }
+
+        // Sistema de Tiro Controlado via Mouse (Botão Esquerdo)
+        if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && saveData.temArma && saveData.municao > 0 && cooldown <= 0f) {
+            saveData.municao--;
+            cooldown = 0.2f;
+
+            // Pega a posição do mouse no mundo
+            Vector3 mouseWorldPos = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+            camera.unproject(mouseWorldPos);
+
+            float startX = player.x + player.width / 2;
+            float startY = player.y + player.height / 2;
+
+            // Direção exata do player até o cursor do mouse
+            float dirX = mouseWorldPos.x - startX;
+            float dirY = mouseWorldPos.y - startY;
+
+            bullets.add(new Bullet(startX, startY, dirX, dirY));
+        }
+
+        // Atualizar Projéteis e Colisões precisas
+        for (int i = bullets.size - 1; i >= 0; i--) {
+            Bullet b = bullets.get(i);
+            b.update(delta);
+            if (!b.active) {
+                bullets.removeIndex(i);
+                continue;
+            }
+            for (Enemy e : enemies) {
+                if (e.ativo && b.rect.overlaps(e.rect)) {
+                    e.hp -= 25; // Dano por tiro
+                    b.active = false;
+                    if (e.hp <= 0) e.ativo = false;
+                    break;
                 }
             }
         }
 
-        for (Item item : items) {
-            if (!item.collected && player.overlaps(item.rect)) {
-                item.collected = true;
-                switch (item.type) {
-                    case O2: o2 += 30; break; case FOOD: energy += 30; break;
-                    case PART_ANTENNA: hasPartAntenna = true; break;
-                    case PART_ENERGY: hasPartEnergy = true; break;
-                    case PART_EXTRACTOR: hasPartExtractor = true; break;
-                    case PART_GREENHOUSE: hasPartGreenhouse = true; break;
-                    case WEP_A: hasWeaponA = true; break;
-                    case WEP_B: hasWeaponB = true; break;
-                    case WEP_C: hasWeaponC = true; break;
-                }
+        if (mission.getEtapaIndex() >= 3) {
+            boolean todosMortos = true;
+            for (Enemy e : enemies) {
+                if (e.ativo) { todosMortos = false; break; }
             }
-        }
-
-        for (int i = enemies.size - 1; i >= 0; i--) {
-            Enemy e = enemies.get(i);
-            Vector2 dir = new Vector2(player.x - e.rect.x, player.y - e.rect.y).nor();
-            e.rect.x += dir.x * e.speed * delta;
-            e.rect.y += dir.y * e.speed * delta;
-
-            if (player.overlaps(e.rect)) {
-                o2 -= 20 * delta; energy -= 20 * delta;
-            }
-        }
-
-        if (isAttacking) {
-            attackTimer -= delta;
-            if (attackTimer <= 0) isAttacking = false;
-        }
-
-        if (hasWeapon && Gdx.input.isKeyJustPressed(Input.Keys.SPACE) && !isAttacking) {
-            isAttacking = true;
-            attackTimer = 0.2f;
-            attackBox.set(player.x - 50, player.y - 50, player.width + 100, player.height + 100);
-
-            for (int i = enemies.size - 1; i >= 0; i--) {
-                if (attackBox.overlaps(enemies.get(i).rect)) {
-                    enemies.removeIndex(i);
-                }
+            if (todosMortos) {
+                game.setScreen(new VictoryScreen(game));
+                return;
             }
         }
 
         if (player.overlaps(portal)) {
-            if (hasWeapon || (repAntenna && repEnergy && repExtractor && repGreenhouse)) {
-                game.setScreen(new MarsScreen(game));
-            }
+            if (saveData.temArma) mission.avancarPara(3);
+            player.x -= 150;
+            saveData.playerX = player.x; saveData.playerY = player.y; saveData.missaoEtapa = mission.getEtapaIndex();
+            saveData.fase = "MARTE";
+            salvarProgresso();
+            game.setScreen(new MarsScreen(game, saveData));
         }
     }
 
-    @Override public void show() {} @Override public void resize(int w, int h) {}
-    @Override public void pause() {} @Override public void resume() {}
-    @Override public void hide() {}
-
-    @Override
-    public void dispose() {
-        batch.dispose(); shapeRenderer.dispose(); font.dispose();
-        if (playerTex != null) playerTex.dispose();
-        if (enemyTex != null) enemyTex.dispose();
-        if (baseTex != null) baseTex.dispose();
-        if (portalTex != null) portalTex.dispose();
-        if (itemTex != null) itemTex.dispose();
-        if (bgTex != null) bgTex.dispose();
+    private void salvarProgresso() {
+        saveData.salvar();
+        saveIndicatorTimer = 2.0f;
     }
+
+    @Override public void show() {} @Override public void resize(int w, int h) {}
+    @Override public void pause() {} @Override public void resume() {} @Override public void hide() {}
+    @Override public void dispose() { batch.dispose(); shapeRenderer.dispose(); font.dispose(); }
 }

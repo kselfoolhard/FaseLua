@@ -5,253 +5,241 @@ import com.badlogic.gdx.Game;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Screen;
-import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.utils.Array;
+import com.modulo06.echoesmoon.entities.Bullet;
+import com.modulo06.echoesmoon.entities.Enemy;
+import com.modulo06.echoesmoon.systems.GameSaveData;
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.math.Vector3;
+
 
 public class MarsScreen implements Screen {
-
     private Game game;
+    private GameSaveData saveData;
     private OrthographicCamera camera;
     private SpriteBatch batch;
     private ShapeRenderer shapeRenderer;
     private BitmapFont font;
 
-    // --- SPRITES (Coloque os arquivos na pasta 'assets') ---
-    private Texture playerTex, enemyTex, crystalTex, bgTex;
+    private Texture fundoMarteTex, playerMarteTex, alienLunarTex, alienChaseTex, portalTex, iceTex, bulletTex;
+    private Rectangle player, portalParaLua;
+    private Array<Enemy> enemies;
+    private Array<Bullet> bullets;
+    private Array<Rectangle> gelo;
 
-    private final float WORLD_WIDTH = 2500f;
-    private final float WORLD_HEIGHT = 2500f;
+    private final float WORLD_WIDTH = 1200f;
+    private final float WORLD_HEIGHT = 1200f;
+    private float cooldown = 0f;
+    private float saveIndicatorTimer = 0f;
 
-    private Rectangle player;
-    private float playerSpeed = 340f; // Marte tem gravidade/movimento ligeiramente mais rapido
-    private float o2 = 100f, o2DrainRate = 5f; // Atmosfera fina consome O2 mais rapido
-    private boolean isDead = false;
-    private boolean gameWon = false;
-
-    // --- COMBATE EM MARTE ---
-    private boolean isAttacking = false;
-    private float attackTimer = 0f;
-    private Rectangle attackBox;
-
-    // --- OBJETIVOS DE MARTE ---
-    private int crystalsCollected = 0;
-    private final int TOTAL_CRYSTALS = 4;
-
-    class MarsEnemy {
-        Rectangle rect; float speed = 160f;
-        public MarsEnemy(float x, float y) { this.rect = new Rectangle(x, y, 40, 40); }
-    }
-
-    class Crystal {
-        Rectangle rect; boolean collected = false;
-        public Crystal(float x, float y) { this.rect = new Rectangle(x, y, 30, 30); }
-    }
-
-    private Array<MarsEnemy> enemies;
-    private Array<Crystal> crystals;
-
-    public MarsScreen(Game game) {
+    public MarsScreen(Game game, GameSaveData saveData) {
         this.game = game;
-        camera = new OrthographicCamera();
-        camera.setToOrtho(false, 800, 600);
+        this.saveData = saveData;
+
+        camera = new OrthographicCamera(); camera.setToOrtho(false, 800, 600);
         batch = new SpriteBatch();
         shapeRenderer = new ShapeRenderer();
         font = new BitmapFont();
 
-        player = new Rectangle(100, 100, 32, 48);
-        attackBox = new Rectangle(0, 0, 120, 120);
+        portalParaLua = new Rectangle(50, 50, 100, 100);
+        player = new Rectangle(300, 300, 32, 48);
+        bullets = new Array<>();
 
-        // Tenta carregar as imagens da pasta assets (se nao achar, usa o fallback)
-        playerTex = safeLoadTexture("player_marte.png");
-        enemyTex = safeLoadTexture("alien.png");
-        crystalTex = safeLoadTexture("crystal.png");
-        bgTex = safeLoadTexture("fundo_marte.png");
-
-        // Spawna inimigos e cristais em Marte
-        enemies = new Array<>();
-        enemies.add(new MarsEnemy(800, 800));
-        enemies.add(new MarsEnemy(1200, 500));
-        enemies.add(new MarsEnemy(1500, 1500));
-        enemies.add(new MarsEnemy(400, 1800));
-
-        crystals = new Array<>();
-        crystals.add(new Crystal(900, 900));
-        crystals.add(new Crystal(1800, 400));
-        crystals.add(new Crystal(500, 1600));
-        crystals.add(new Crystal(2200, 2200));
+        carregarTexturas();
+        gerarMundo();
     }
 
-    private Texture safeLoadTexture(String path) {
-        try {
-            if (Gdx.files.internal(path).exists()) return new Texture(path);
-        } catch (Exception ignored) {}
+    private void carregarTexturas() {
+        fundoMarteTex = safeLoad("fundo_marte.png");
+        playerMarteTex = safeLoad("player_marte.png");
+        alienLunarTex = safeLoad("alien_lunar.png");
+        alienChaseTex = safeLoad("alien.png");
+        portalTex = safeLoad("portal.png");
+        iceTex = safeLoad("ice.png");
+        bulletTex = safeLoad("bullet.png");
+    }
+
+    private Texture safeLoad(String path) {
+        try { if (Gdx.files.internal(path).exists()) return new Texture(path); } catch (Exception ignored) {}
         return null;
+    }
+
+    private void gerarMundo() {
+        enemies = new Array<>(); gelo = new Array<>();
+
+        int enemyCount = 14;
+        for (int i = 0; i < enemyCount; i++) {
+            float ex = MathUtils.random(200, WORLD_WIDTH - 200);
+            float ey = MathUtils.random(200, WORLD_HEIGHT - 200);
+            int type = (i % 3 == 0) ? 1 : 0;
+            enemies.add(new Enemy(ex, ey, type));
+        }
+
+        gelo.add(new Rectangle(600, 200, 32, 32));
+        gelo.add(new Rectangle(900, 800, 32, 32));
     }
 
     @Override
     public void render(float delta) {
         update(delta);
 
-        // Fundo vermelho marciano
-        Gdx.gl.glClearColor(0.4f, 0.08f, 0.05f, 1);
+        Gdx.gl.glClearColor(0.4f, 0.1f, 0.1f, 1);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
         camera.update();
 
-        // 1. DESENHO DE TEXTURAS / SPRITES DE FUNDO
         batch.setProjectionMatrix(camera.combined);
         batch.begin();
-        if (bgTex != null) {
-            batch.draw(bgTex, 0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+
+        if (fundoMarteTex != null) batch.draw(fundoMarteTex, 0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+        if (portalTex != null) batch.draw(portalTex, portalParaLua.x, portalParaLua.y, portalParaLua.width, portalParaLua.height);
+
+        for (Rectangle g : gelo) if (iceTex != null) batch.draw(iceTex, g.x, g.y, g.width, g.height);
+
+        for (Enemy e : enemies) {
+            if (e.ativo) {
+                Texture texToDraw = (e.type == 0) ? alienLunarTex : alienChaseTex;
+                if (texToDraw != null) batch.draw(texToDraw, e.rect.x, e.rect.y, e.rect.width, e.rect.height);
+            }
         }
+
+        for (Bullet b : bullets) {
+            if (b.active && bulletTex != null) {
+                batch.draw(bulletTex, b.rect.x, b.rect.y, b.rect.width, b.rect.height);
+            }
+        }
+
+        if (playerMarteTex != null) batch.draw(playerMarteTex, player.x, player.y, player.width, player.height);
+
         batch.end();
 
-        // 2. DESENHO DE RETÂNGULOS (FALLBACK SE NÃO HOUVER SPRITE)
+        // Healthbars dos inimigos e Crosshair do mouse em Marte
         shapeRenderer.setProjectionMatrix(camera.combined);
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
 
-        // Cristais (se nao tiver sprite)
-        if (crystalTex == null) {
-            shapeRenderer.setColor(Color.CYAN);
-            for (Crystal c : crystals) {
-                if (!c.collected) shapeRenderer.rect(c.rect.x, c.rect.y, c.rect.width, c.rect.height);
+        for (Enemy e : enemies) {
+            if (e.ativo) {
+                float barWidth = 36f;
+                float barHeight = 5f;
+                float barX = e.rect.x;
+                float barY = e.rect.y + e.rect.height + 6;
+
+                shapeRenderer.setColor(0.8f, 0.1f, 0.1f, 1);
+                shapeRenderer.rect(barX, barY, barWidth, barHeight);
+
+                float healthRatio = (float) e.hp / e.maxHp;
+                shapeRenderer.setColor(0.1f, 0.9f, 0.1f, 1);
+                shapeRenderer.rect(barX, barY, barWidth * healthRatio, barHeight);
             }
         }
 
-        // Inimigos (se nao tiver sprite)
-        if (enemyTex == null) {
-            shapeRenderer.setColor(Color.PURPLE);
-            for (MarsEnemy e : enemies) shapeRenderer.rect(e.rect.x, e.rect.y, e.rect.width, e.rect.height);
-        }
+        // Crosshair em Marte
+        Vector3 mousePos = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+        camera.unproject(mousePos);
+        shapeRenderer.setColor(1f, 1f, 1f, 0.8f);
+        shapeRenderer.rect(mousePos.x - 8, mousePos.y - 1, 16, 2);
+        shapeRenderer.rect(mousePos.x - 1, mousePos.y - 8, 2, 16);
 
-        // Player (se nao tiver sprite)
-        if (playerTex == null) {
-            shapeRenderer.setColor(isDead ? Color.GRAY : Color.GREEN);
-            shapeRenderer.rect(player.x, player.y, player.width, player.height);
-        }
-
-        // Area de ataque visual
-        if (isAttacking) {
-            shapeRenderer.setColor(new Color(1, 0, 0, 0.4f));
-            shapeRenderer.rect(attackBox.x, attackBox.y, attackBox.width, attackBox.height);
-        }
         shapeRenderer.end();
 
-        // 3. DESENHO DAS TEXTURAS/SPRITES DAS ENTIDADES
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, 1280, 720);
         batch.begin();
-        if (crystalTex != null) {
-            for (Crystal c : crystals) {
-                if (!c.collected) batch.draw(crystalTex, c.rect.x, c.rect.y, c.rect.width, c.rect.height);
-            }
-        }
-        if (enemyTex != null) {
-            for (MarsEnemy e : enemies) batch.draw(enemyTex, e.rect.x, e.rect.y, e.rect.width, e.rect.height);
-        }
-        if (playerTex != null) {
-            batch.draw(playerTex, player.x, player.y, player.width, player.height);
+        font.draw(batch, "MARTE - O2: " + (int)saveData.o2 + "% | MUNICAO: " + saveData.municao, 30, 690);
+        font.draw(batch, "[CLIQUE ESQ] ATIRAR COM MIRA | ELIMINE OS INIMIGOS", 30, 660);
+
+        if (saveIndicatorTimer > 0) {
+            font.draw(batch, "[💾 JOGO SALVO COM SUCESSO!]", 1050, 690);
         }
         batch.end();
-
-        // 4. HUD E TEXTOS
-        batch.getProjectionMatrix().setToOrtho2D(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-        batch.begin();
-        font.draw(batch, "FASE 2: MARTE | O2 Restante: " + (int)o2 + "%", 10, Gdx.graphics.getHeight() - 10);
-        font.draw(batch, "Cristais de Terraformacao: " + crystalsCollected + " / " + TOTAL_CRYSTALS, 10, Gdx.graphics.getHeight() - 30);
-        font.draw(batch, "Controles: WASD/Seta = Move | ESPACO = Atacar Aliens", 10, Gdx.graphics.getHeight() - 50);
-
-        if (gameWon) {
-            font.getData().setScale(2f);
-            font.draw(batch, "MISSÃO CUMPRIDA! MARTE FOI COLONIZADO!", 100, Gdx.graphics.getHeight() / 2);
-        } else if (isDead) {
-            font.getData().setScale(2f);
-            font.draw(batch, "VOCE SUCUMBIU EM MARTE!", 200, Gdx.graphics.getHeight() / 2);
-        }
-        batch.end();
-        font.getData().setScale(1f); // Reset escala da fonte
     }
 
     private void update(float delta) {
-        if (isDead || gameWon) return;
+        if (cooldown > 0f) cooldown -= delta;
+        if (saveIndicatorTimer > 0f) saveIndicatorTimer -= delta;
 
-        // Drenagem de O2
-        o2 -= o2DrainRate * delta;
-        if (o2 <= 0) { isDead = true; return; }
+        saveData.o2 -= 2.5f * delta;
+        saveData.energia -= 1.5f * delta;
 
-        // Movimento
-        float moveX = 0, moveY = 0;
-        if (Gdx.input.isKeyPressed(Input.Keys.A) || Gdx.input.isKeyPressed(Input.Keys.LEFT)) moveX -= playerSpeed * delta;
-        if (Gdx.input.isKeyPressed(Input.Keys.D) || Gdx.input.isKeyPressed(Input.Keys.RIGHT)) moveX += playerSpeed * delta;
-        if (Gdx.input.isKeyPressed(Input.Keys.W) || Gdx.input.isKeyPressed(Input.Keys.UP)) moveY += playerSpeed * delta;
-        if (Gdx.input.isKeyPressed(Input.Keys.S) || Gdx.input.isKeyPressed(Input.Keys.DOWN)) moveY -= playerSpeed * delta;
+        if (saveData.o2 <= 0 || saveData.energia <= 0) {
+            game.setScreen(new GameOverScreen(game));
+            return;
+        }
 
-        player.x += moveX; player.y += moveY;
+        if (Gdx.input.isKeyJustPressed(Input.Keys.R)) {
+            saveData.municao = 10;
+        }
+
+        if (Gdx.input.isKeyPressed(Input.Keys.A)) player.x -= 300 * delta;
+        if (Gdx.input.isKeyPressed(Input.Keys.D)) player.x += 300 * delta;
+        if (Gdx.input.isKeyPressed(Input.Keys.W)) player.y += 300 * delta;
+        if (Gdx.input.isKeyPressed(Input.Keys.S)) player.y -= 300 * delta;
+
         player.x = MathUtils.clamp(player.x, 0, WORLD_WIDTH - player.width);
         player.y = MathUtils.clamp(player.y, 0, WORLD_HEIGHT - player.height);
+        camera.position.set(player.x, player.y, 0);
 
-        camera.position.set(
-            MathUtils.clamp(player.x, camera.viewportWidth / 2f, WORLD_WIDTH - camera.viewportWidth / 2f),
-            MathUtils.clamp(player.y, camera.viewportHeight / 2f, WORLD_HEIGHT - camera.viewportHeight / 2f), 0
-        );
+        Vector2 pPos = new Vector2(player.x, player.y);
+        for (Enemy e : enemies) {
+            e.update(delta, pPos);
+            if (e.ativo && player.overlaps(e.rect)) saveData.o2 -= 15f * delta;
+        }
 
-        // Coleta de Cristais
-        for (Crystal c : crystals) {
-            if (!c.collected && player.overlaps(c.rect)) {
-                c.collected = true;
-                crystalsCollected++;
-                o2 = Math.min(100f, o2 + 25f); // Cada cristal recarrega um pouco do O2
-                if (crystalsCollected >= TOTAL_CRYSTALS) {
-                    gameWon = true;
+        // Sistema de Tiro com Mouse em Marte
+        if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && saveData.temArma && saveData.municao > 0 && cooldown <= 0f) {
+            saveData.municao--;
+            cooldown = 0.2f;
+
+            Vector3 mouseWorldPos = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+            camera.unproject(mouseWorldPos);
+
+            float startX = player.x + player.width / 2;
+            float startY = player.y + player.height / 2;
+
+            float dirX = mouseWorldPos.x - startX;
+            float dirY = mouseWorldPos.y - startY;
+
+            bullets.add(new Bullet(startX, startY, dirX, dirY));
+        }
+
+        for (int i = bullets.size - 1; i >= 0; i--) {
+            Bullet b = bullets.get(i);
+            b.update(delta);
+            if (!b.active) {
+                bullets.removeIndex(i);
+                continue;
+            }
+            for (Enemy e : enemies) {
+                if (e.ativo && b.rect.overlaps(e.rect)) {
+                    e.hp -= 25;
+                    b.active = false;
+                    if (e.hp <= 0) e.ativo = false;
+                    break;
                 }
             }
         }
 
-        // Inimigos Marcianos perseguem o jogador
-        for (MarsEnemy e : enemies) {
-            Vector2 dir = new Vector2(player.x - e.rect.x, player.y - e.rect.y).nor();
-            e.rect.x += dir.x * e.speed * delta;
-            e.rect.y += dir.y * e.speed * delta;
-
-            if (player.overlaps(e.rect)) {
-                o2 -= 15f * delta; // Alien suga O2 rapidamente
-            }
+        for (int i = gelo.size - 1; i >= 0; i--) {
+            if (player.overlaps(gelo.get(i))) { saveData.o2 = Math.min(100f, saveData.o2 + 25f); gelo.removeIndex(i); }
         }
 
-        // Ataque com a arma trazida da Lua
-        if (isAttacking) {
-            attackTimer -= delta;
-            if (attackTimer <= 0) isAttacking = false;
-        }
-
-        if (Gdx.input.isKeyJustPressed(Input.Keys.SPACE) && !isAttacking) {
-            isAttacking = true;
-            attackTimer = 0.2f;
-            attackBox.set(player.x - 60, player.y - 60, player.width + 120, player.height + 120);
-
-            for (int i = enemies.size - 1; i >= 0; i--) {
-                if (attackBox.overlaps(enemies.get(i).rect)) {
-                    enemies.removeIndex(i);
-                }
-            }
+        if (player.overlaps(portalParaLua)) {
+            saveData.missaoEtapa = 3;
+            player.x += 150;
+            saveData.playerX = player.x; saveData.playerY = player.y;
+            saveData.fase = "LUA";
+            saveData.salvar();
+            game.setScreen(new GameScreen(game, saveData));
         }
     }
 
     @Override public void show() {} @Override public void resize(int w, int h) {}
-    @Override public void pause() {} @Override public void resume() {}
-    @Override public void hide() {}
-    @Override
-    public void dispose() {
-        batch.dispose(); shapeRenderer.dispose(); font.dispose();
-        if (playerTex != null) playerTex.dispose();
-        if (enemyTex != null) enemyTex.dispose();
-        if (crystalTex != null) crystalTex.dispose();
-        if (bgTex != null) bgTex.dispose();
-    }
+    @Override public void pause() {} @Override public void resume() {} @Override public void hide() {}
+    @Override public void dispose() { batch.dispose(); shapeRenderer.dispose(); font.dispose(); }
 }
