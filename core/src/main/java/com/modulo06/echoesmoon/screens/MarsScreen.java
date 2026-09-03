@@ -1,6 +1,5 @@
 package com.modulo06.echoesmoon.screens;
 
-
 import com.badlogic.gdx.Game;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
@@ -8,18 +7,21 @@ import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.Animation;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
-import com.badlogic.gdx.utils.Array;
-import com.modulo06.echoesmoon.entities.Bullet;
-import com.modulo06.echoesmoon.entities.Enemy;
-import com.modulo06.echoesmoon.systems.GameSaveData;
-import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Vector3;
-
+import com.badlogic.gdx.utils.Array;
+import com.modulo06.echoesmoon.entities.Enemy;
+import com.modulo06.echoesmoon.entities.ItemDrop;
+import com.modulo06.echoesmoon.entities.SlashWave;
+import com.modulo06.echoesmoon.systems.DialogSystem;
+import com.modulo06.echoesmoon.systems.GameSaveData;
 
 public class MarsScreen implements Screen {
     private Game game;
@@ -29,42 +31,62 @@ public class MarsScreen implements Screen {
     private ShapeRenderer shapeRenderer;
     private BitmapFont font;
 
-    private Texture fundoMarteTex, playerMarteTex, alienLunarTex, alienChaseTex, portalTex, iceTex, bulletTex;
-    private Rectangle player, portalParaLua;
+    private Texture fundoTex, alienTex, portalTex, o2Tex, tiroAlienTex, slashTex, playerSheet, npcTex;
+    private Animation<TextureRegion> playerAnim;
+    private float stateTime = 0f;
+
+    private Rectangle player, portalParaTita, npcRect;
     private Array<Enemy> enemies;
-    private Array<Bullet> bullets;
-    private Array<Rectangle> gelo;
+    private Array<SlashWave> slashes;
+    private Array<ItemDrop> drops;
+
+    private class TiroAlien {
+        Rectangle rect; Vector2 vel; boolean ativo = true;
+        public TiroAlien(float x, float y, Vector2 dir) { rect = new Rectangle(x,y,12,12); vel = dir.nor().scl(200f); }
+        public void update(float delta) { rect.x += vel.x * delta; rect.y += vel.y * delta; }
+    }
+    private Array<TiroAlien> projeteisAlien;
+    private DialogSystem dialog = new DialogSystem();
 
     private final float WORLD_WIDTH = 1200f;
     private final float WORLD_HEIGHT = 1200f;
-    private float cooldown = 0f;
-    private float saveIndicatorTimer = 0f;
+
+    private float cooldown = 0f, reloadTimer = 0f, avisoTimer = 0f;
+    private int waveState = 1;
+    private float waveTimer = 25f, spawnTimer = 0f;
+    private String mensagemAviso = "";
+
+    private boolean wavesIniciadas = false;
+    private boolean titaLiberado = false, mostrarQuest = true;
 
     public MarsScreen(Game game, GameSaveData saveData) {
-        this.game = game;
-        this.saveData = saveData;
-
+        this.game = game; this.saveData = saveData;
         camera = new OrthographicCamera(); camera.setToOrtho(false, 800, 600);
-        batch = new SpriteBatch();
-        shapeRenderer = new ShapeRenderer();
-        font = new BitmapFont();
+        batch = new SpriteBatch(); shapeRenderer = new ShapeRenderer(); font = new BitmapFont();
 
-        portalParaLua = new Rectangle(50, 50, 100, 100);
         player = new Rectangle(300, 300, 32, 48);
-        bullets = new Array<>();
+        npcRect = new Rectangle(600, 600, 32, 48); // Posição do NPC
+        portalParaTita = new Rectangle(1000, 1000, 100, 100);
 
+        slashes = new Array<>(); drops = new Array<>(); enemies = new Array<>();
+        projeteisAlien = new Array<>();
         carregarTexturas();
-        gerarMundo();
     }
 
     private void carregarTexturas() {
-        fundoMarteTex = safeLoad("fundo_marte.png");
-        playerMarteTex = safeLoad("player_marte.png");
-        alienLunarTex = safeLoad("alien_lunar.png");
-        alienChaseTex = safeLoad("alien.png");
-        portalTex = safeLoad("portal.png");
-        iceTex = safeLoad("ice.png");
-        bulletTex = safeLoad("bullet.png");
+        fundoTex = safeLoad("fundo_marte.png"); alienTex = safeLoad("alien.png");
+        portalTex = safeLoad("portal.png"); o2Tex = safeLoad("o2.png");
+        slashTex = safeLoad("slash_wave.png"); tiroAlienTex = safeLoad("tiro_alien.png");
+        npcTex = safeLoad("npc.png");
+
+        playerSheet = safeLoad("player_marte.png");
+        if (playerSheet == null) playerSheet = safeLoad("player_lua.png");
+        if (playerSheet != null) {
+            TextureRegion[][] tmp = TextureRegion.split(playerSheet, playerSheet.getWidth() / 4, playerSheet.getHeight());
+            TextureRegion[] walkFrames = new TextureRegion[4]; int index = 0;
+            for (int j = 0; j < 4; j++) walkFrames[index++] = tmp[0][j];
+            playerAnim = new Animation<>(0.15f, walkFrames);
+        }
     }
 
     private Texture safeLoad(String path) {
@@ -72,174 +94,205 @@ public class MarsScreen implements Screen {
         return null;
     }
 
-    private void gerarMundo() {
-        enemies = new Array<>(); gelo = new Array<>();
-
-        int enemyCount = 14;
-        for (int i = 0; i < enemyCount; i++) {
-            float ex = MathUtils.random(200, WORLD_WIDTH - 200);
-            float ey = MathUtils.random(200, WORLD_HEIGHT - 200);
-            int type = (i % 3 == 0) ? 1 : 0;
-            enemies.add(new Enemy(ex, ey, type));
-        }
-
-        gelo.add(new Rectangle(600, 200, 32, 32));
-        gelo.add(new Rectangle(900, 800, 32, 32));
-    }
-
     @Override
     public void render(float delta) {
         update(delta);
-
-        Gdx.gl.glClearColor(0.4f, 0.1f, 0.1f, 1);
-        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+        Gdx.gl.glClearColor(0.6f, 0.2f, 0.1f, 1); Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
         camera.update();
 
-        batch.setProjectionMatrix(camera.combined);
-        batch.begin();
+        // 1. TEXTURAS
+        batch.setProjectionMatrix(camera.combined); batch.begin();
+        if (fundoTex != null) batch.draw(fundoTex, 0, 0, WORLD_WIDTH, WORLD_HEIGHT);
 
-        if (fundoMarteTex != null) batch.draw(fundoMarteTex, 0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-        if (portalTex != null) batch.draw(portalTex, portalParaLua.x, portalParaLua.y, portalParaLua.width, portalParaLua.height);
+        if (!wavesIniciadas) {
+            if (npcTex != null) batch.draw(npcTex, npcRect.x, npcRect.y, npcRect.width, npcRect.height);
+            else font.draw(batch, "[NPC]", npcRect.x, npcRect.y + 60);
+        }
 
-        for (Rectangle g : gelo) if (iceTex != null) batch.draw(iceTex, g.x, g.y, g.width, g.height);
+        if (titaLiberado && portalTex != null) batch.draw(portalTex, portalParaTita.x, portalParaTita.y, portalParaTita.width, portalParaTita.height);
 
+        for (ItemDrop drop : drops) {
+            if (o2Tex != null) batch.draw(o2Tex, drop.rect.x, drop.rect.y, drop.rect.width, drop.rect.height);
+        }
         for (Enemy e : enemies) {
-            if (e.ativo) {
-                Texture texToDraw = (e.type == 0) ? alienLunarTex : alienChaseTex;
-                if (texToDraw != null) batch.draw(texToDraw, e.rect.x, e.rect.y, e.rect.width, e.rect.height);
+            if (e.ativo && alienTex != null) batch.draw(alienTex, e.rect.x, e.rect.y, e.rect.width, e.rect.height);
+        }
+        for (TiroAlien t : projeteisAlien) {
+            if (t.ativo) {
+                Texture tex = tiroAlienTex != null ? tiroAlienTex : o2Tex;
+                if (tex != null) batch.draw(tex, t.rect.x, t.rect.y, t.rect.width, t.rect.height);
             }
         }
-
-        for (Bullet b : bullets) {
-            if (b.active && bulletTex != null) {
-                batch.draw(bulletTex, b.rect.x, b.rect.y, b.rect.width, b.rect.height);
-            }
+        for (SlashWave s : slashes) {
+            if (s.active && slashTex != null) batch.draw(slashTex, s.rect.x, s.rect.y, 32, 32, 64, 64, 1f, 1f, s.angle, 0, 0, slashTex.getWidth(), slashTex.getHeight(), false, false);
         }
-
-        if (playerMarteTex != null) batch.draw(playerMarteTex, player.x, player.y, player.width, player.height);
-
+        if (playerAnim != null) batch.draw(playerAnim.getKeyFrame(stateTime, true), player.x, player.y, player.width, player.height);
+        else if (playerSheet != null) batch.draw(playerSheet, player.x, player.y, player.width, player.height);
         batch.end();
 
-        // Healthbars dos inimigos e Crosshair do mouse em Marte
+        // 2. BARRAS DE VIDA (ShapeRenderer)
         shapeRenderer.setProjectionMatrix(camera.combined);
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
-
         for (Enemy e : enemies) {
             if (e.ativo) {
-                float barWidth = 36f;
-                float barHeight = 5f;
-                float barX = e.rect.x;
-                float barY = e.rect.y + e.rect.height + 6;
-
-                shapeRenderer.setColor(0.8f, 0.1f, 0.1f, 1);
-                shapeRenderer.rect(barX, barY, barWidth, barHeight);
-
-                float healthRatio = (float) e.hp / e.maxHp;
-                shapeRenderer.setColor(0.1f, 0.9f, 0.1f, 1);
-                shapeRenderer.rect(barX, barY, barWidth * healthRatio, barHeight);
+                shapeRenderer.setColor(0.8f, 0f, 0f, 1);
+                shapeRenderer.rect(e.rect.x, e.rect.y + e.rect.height + 5, e.rect.width, 5);
+                shapeRenderer.setColor(0f, 0.8f, 0f, 1);
+                float hpPercent = Math.max(0, e.hp / 100f);
+                shapeRenderer.rect(e.rect.x, e.rect.y + e.rect.height + 5, e.rect.width * hpPercent, 5);
             }
         }
-
-        // Crosshair em Marte
-        Vector3 mousePos = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
-        camera.unproject(mousePos);
-        shapeRenderer.setColor(1f, 1f, 1f, 0.8f);
-        shapeRenderer.rect(mousePos.x - 8, mousePos.y - 1, 16, 2);
-        shapeRenderer.rect(mousePos.x - 1, mousePos.y - 8, 2, 16);
-
         shapeRenderer.end();
 
-        batch.getProjectionMatrix().setToOrtho2D(0, 0, 1280, 720);
-        batch.begin();
-        font.draw(batch, "MARTE - O2: " + (int)saveData.o2 + "% | MUNICAO: " + saveData.municao, 30, 690);
-        font.draw(batch, "[CLIQUE ESQ] ATIRAR COM MIRA | ELIMINE OS INIMIGOS", 30, 660);
+        desenharHUDL4D();
+    }
 
-        if (saveIndicatorTimer > 0) {
-            font.draw(batch, "[💾 JOGO SALVO COM SUCESSO!]", 1050, 690);
+    private void desenharHUDL4D() {
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, 1280, 720);
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        shapeRenderer.setProjectionMatrix(batch.getProjectionMatrix());
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+
+        if (mostrarQuest) {
+            shapeRenderer.setColor(0.05f, 0.05f, 0.05f, 0.6f); shapeRenderer.rect(20, 580, 350, 120);
+            shapeRenderer.setColor(1f, 1f, 1f, 0.8f); shapeRenderer.rectLine(20, 580, 20, 700, 4);
         }
+
+        shapeRenderer.setColor(0.05f, 0.05f, 0.05f, 0.6f); shapeRenderer.rect(20, 20, 250, 80);
+        shapeRenderer.setColor(0.1f, 0.8f, 0.2f, 1f); shapeRenderer.rect(30, 30, 230 * (Math.max(0, saveData.o2) / 100f), 15);
+
+        // Fundo do Dialog
+        if (dialog.isOpen()) {
+            shapeRenderer.setColor(0f, 0f, 0f, 0.9f); shapeRenderer.rect(200, 500, 880, 150);
+            shapeRenderer.setColor(1f, 1f, 1f, 1f);
+            shapeRenderer.rectLine(200, 500, 1080, 500, 4); shapeRenderer.rectLine(200, 650, 1080, 650, 4);
+            shapeRenderer.rectLine(200, 500, 200, 650, 4); shapeRenderer.rectLine(1080, 500, 1080, 650, 4);
+        }
+        shapeRenderer.end(); Gdx.gl.glDisable(GL20.GL_BLEND);
+
+        batch.begin();
+        font.setColor(1, 1, 1, 1);
+        font.draw(batch, "+ " + (int)Math.max(0, saveData.o2), 30, 75);
+        font.getData().setScale(1.5f);
+        font.draw(batch, (reloadTimer > 0) ? "RECARREGANDO..." : String.valueOf(saveData.municao), 1150, 350);
+        font.getData().setScale(1f);
+
+        if (mostrarQuest) {
+            font.draw(batch, "OBJETIVOS ATUAIS", 40, 680);
+            if (!wavesIniciadas) font.draw(batch, "- Fale com o Comandante (NPC).", 40, 650);
+            else font.draw(batch, "- Sobreviva as ondas (" + (Math.min(waveState, 3)) + "/3).", 40, 650);
+            if (titaLiberado) font.draw(batch, "- Fuja pelo portal para Tita!", 40, 610);
+        }
+
+        font.draw(batch, "[TAB] Ocultar Objetivos | [F5] Salvar", 20, 715);
+        if (avisoTimer > 0) font.draw(batch, mensagemAviso, 600, 100);
+
+        if (dialog.isOpen()) font.draw(batch, "* " + dialog.line(), 230, 600);
+
+        batch.setProjectionMatrix(camera.combined);
+        if (!wavesIniciadas && !dialog.isOpen() && player.overlaps(npcRect)) font.draw(batch, "[E] FALAR", npcRect.x, npcRect.y - 10);
+        if (titaLiberado && player.overlaps(portalParaTita)) font.draw(batch, "[E] IR PARA TITA", portalParaTita.x, portalParaTita.y - 20);
         batch.end();
     }
 
     private void update(float delta) {
         if (cooldown > 0f) cooldown -= delta;
-        if (saveIndicatorTimer > 0f) saveIndicatorTimer -= delta;
+        if (avisoTimer > 0f) avisoTimer -= delta;
+        if (reloadTimer > 0f) reloadTimer -= delta;
 
-        saveData.o2 -= 2.5f * delta;
-        saveData.energia -= 1.5f * delta;
+        boolean isTalking = dialog.isOpen();
+        saveData.o2 -= 1.0f * delta;
+        if (saveData.o2 <= 0) { game.setScreen(new GameOverScreen(game)); return; }
 
-        if (saveData.o2 <= 0 || saveData.energia <= 0) {
-            game.setScreen(new GameOverScreen(game));
-            return;
-        }
+        if (Gdx.input.isKeyJustPressed(Input.Keys.TAB)) mostrarQuest = !mostrarQuest;
+        if (Gdx.input.isKeyJustPressed(Input.Keys.F5)) { saveData.salvar(); mensagemAviso = "JOGO SALVO!"; avisoTimer = 2.0f; }
+        if (Gdx.input.isKeyJustPressed(Input.Keys.R) && reloadTimer <= 0f && saveData.municao < 25) { saveData.municao = 25; reloadTimer = 2.0f; }
 
-        if (Gdx.input.isKeyJustPressed(Input.Keys.R)) {
-            saveData.municao = 10;
-        }
-
-        if (Gdx.input.isKeyPressed(Input.Keys.A)) player.x -= 300 * delta;
-        if (Gdx.input.isKeyPressed(Input.Keys.D)) player.x += 300 * delta;
-        if (Gdx.input.isKeyPressed(Input.Keys.W)) player.y += 300 * delta;
-        if (Gdx.input.isKeyPressed(Input.Keys.S)) player.y -= 300 * delta;
-
-        player.x = MathUtils.clamp(player.x, 0, WORLD_WIDTH - player.width);
-        player.y = MathUtils.clamp(player.y, 0, WORLD_HEIGHT - player.height);
-        camera.position.set(player.x, player.y, 0);
-
-        Vector2 pPos = new Vector2(player.x, player.y);
-        for (Enemy e : enemies) {
-            e.update(delta, pPos);
-            if (e.ativo && player.overlaps(e.rect)) saveData.o2 -= 15f * delta;
-        }
-
-        // Sistema de Tiro com Mouse em Marte
-        if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && saveData.temArma && saveData.municao > 0 && cooldown <= 0f) {
-            saveData.municao--;
-            cooldown = 0.2f;
-
-            Vector3 mouseWorldPos = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
-            camera.unproject(mouseWorldPos);
-
-            float startX = player.x + player.width / 2;
-            float startY = player.y + player.height / 2;
-
-            float dirX = mouseWorldPos.x - startX;
-            float dirY = mouseWorldPos.y - startY;
-
-            bullets.add(new Bullet(startX, startY, dirX, dirY));
-        }
-
-        for (int i = bullets.size - 1; i >= 0; i--) {
-            Bullet b = bullets.get(i);
-            b.update(delta);
-            if (!b.active) {
-                bullets.removeIndex(i);
-                continue;
+        if (isTalking) {
+            if (Gdx.input.isKeyJustPressed(Input.Keys.E) || Gdx.input.isKeyJustPressed(Input.Keys.SPACE)) {
+                dialog.next();
+                if (!dialog.isOpen()) wavesIniciadas = true; // Inicia as waves ao fechar o dialogo
             }
-            for (Enemy e : enemies) {
-                if (e.ativo && b.rect.overlaps(e.rect)) {
-                    e.hp -= 25;
-                    b.active = false;
-                    if (e.hp <= 0) e.ativo = false;
-                    break;
+        } else {
+            // Movimentação do Jogador
+            boolean moving = false;
+            if (Gdx.input.isKeyPressed(Input.Keys.A)) { player.x -= 300 * delta; moving = true; }
+            if (Gdx.input.isKeyPressed(Input.Keys.D)) { player.x += 300 * delta; moving = true; }
+            if (Gdx.input.isKeyPressed(Input.Keys.W)) { player.y += 300 * delta; moving = true; }
+            if (Gdx.input.isKeyPressed(Input.Keys.S)) { player.y -= 300 * delta; moving = true; }
+            if (moving) stateTime += delta;
+
+            player.x = MathUtils.clamp(player.x, 0, WORLD_WIDTH - player.width);
+            player.y = MathUtils.clamp(player.y, 0, WORLD_HEIGHT - player.height);
+            camera.position.set(player.x, player.y, 0);
+
+            // Interação com NPC
+            if (!wavesIniciadas && player.overlaps(npcRect) && Gdx.input.isKeyJustPressed(Input.Keys.E)) {
+                dialog.start(new String[]{
+                    "ATENCAO RECRUTA! Os alienigenas detectaram nossa presenca.",
+                    "Eles atacarao em 3 grandes ondas de choque.",
+                    "Nao deixe que destruam seu traje. Sobreviva e fuja!"
+                });
+            }
+
+            // Lógica das Waves
+            if (wavesIniciadas && waveState <= 3) {
+                waveTimer -= delta; spawnTimer += delta;
+                if (spawnTimer >= 1.5f - (waveState * 0.2f)) {
+                    enemies.add(new Enemy(MathUtils.random(100, WORLD_WIDTH - 100), MathUtils.random(100, WORLD_HEIGHT - 100), 0));
+                    spawnTimer = 0f;
+                }
+                if (waveTimer <= 0) {
+                    waveState++; waveTimer = 25f;
+                    if (waveState > 3) { titaLiberado = true; mensagemAviso = "PORTAL TITA ABERTO!"; avisoTimer = 4f; }
                 }
             }
-        }
 
-        for (int i = gelo.size - 1; i >= 0; i--) {
-            if (player.overlaps(gelo.get(i))) { saveData.o2 = Math.min(100f, saveData.o2 + 25f); gelo.removeIndex(i); }
-        }
+            // IA e Colisões
+            for (Enemy e : enemies) {
+                if (e.ativo) {
+                    Vector2 dir = new Vector2(player.x - e.rect.x, player.y - e.rect.y);
+                    if (dir.len() > 0) { e.rect.x += dir.nor().x * 55 * delta; e.rect.y += dir.nor().y * 55 * delta; }
+                    if (MathUtils.random() < 0.01f) projeteisAlien.add(new TiroAlien(e.rect.x, e.rect.y, new Vector2(player.x - e.rect.x, player.y - e.rect.y)));
+                    if (e.rect.overlaps(player)) saveData.o2 -= 10f * delta;
+                }
+            }
 
-        if (player.overlaps(portalParaLua)) {
-            saveData.missaoEtapa = 3;
-            player.x += 150;
-            saveData.playerX = player.x; saveData.playerY = player.y;
-            saveData.fase = "LUA";
-            saveData.salvar();
-            game.setScreen(new GameScreen(game, saveData));
+            for (int i = projeteisAlien.size - 1; i >= 0; i--) {
+                TiroAlien t = projeteisAlien.get(i); t.update(delta);
+                if (t.rect.overlaps(player)) { saveData.o2 -= 10f; t.ativo = false; projeteisAlien.removeIndex(i); }
+            }
+
+            if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && saveData.municao > 0 && cooldown <= 0f && reloadTimer <= 0f) {
+                saveData.municao--; cooldown = 0.25f;
+                Vector3 m = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+                camera.unproject(m); slashes.add(new SlashWave(player.x, player.y, m.x, m.y));
+            }
+
+            for (int i = slashes.size - 1; i >= 0; i--) {
+                SlashWave s = slashes.get(i); s.update(delta);
+                if (!s.active) { slashes.removeIndex(i); continue; }
+                for (Enemy e : enemies) {
+                    if (e.ativo && s.rect.overlaps(e.rect)) {
+                        e.hp -= 40; s.active = false;
+                        if (e.hp <= 0) {
+                            e.ativo = false;
+                            if (MathUtils.randomBoolean(0.3f)) drops.add(new ItemDrop(e.rect.x, e.rect.y, 0));
+                        }
+                        break;
+                    }
+                }
+            }
+
+            for (int i = drops.size - 1; i >= 0; i--) {
+                ItemDrop drop = drops.get(i);
+                if (player.overlaps(drop.rect)) { saveData.o2 = Math.min(100, saveData.o2 + 15); drops.removeIndex(i); }
+            }
+
+            if (titaLiberado && Gdx.input.isKeyJustPressed(Input.Keys.E) && player.overlaps(portalParaTita)) {
+                saveData.fase = "TITA"; saveData.salvar(); game.setScreen(new TitanScreen(game, saveData));
+            }
         }
     }
-
-    @Override public void show() {} @Override public void resize(int w, int h) {}
-    @Override public void pause() {} @Override public void resume() {} @Override public void hide() {}
-    @Override public void dispose() { batch.dispose(); shapeRenderer.dispose(); font.dispose(); }
+    @Override public void show(){} @Override public void resize(int w, int h){} @Override public void pause(){} @Override public void resume(){} @Override public void hide(){} @Override public void dispose(){}
 }
