@@ -1,58 +1,43 @@
 package com.modulo06.echoesmoon.systems;
 
-import com.badlogic.gdx.math.Vector2;
-
-import com.modulo06.echoesmoon.entities.InimigoTita;
+import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.utils.Array;
+import com.modulo06.echoesmoon.entities.Enemy;
+import com.modulo06.echoesmoon.entities.SlashWave;
 
 public class CombatSystem {
-    public float alcance = 80f;
-    public float cooldown = 0f, cooldownMax = 0.40f;
-    public int municao = 8;
-    public int dano = 25;
 
-    // Mecânicas de Slash (Espada de Energia) e Reload
-    public float reloadCooldown = 0f, reloadMax = 1.5f;
-    public boolean isSlashing = false;
-    public float slashTimer = 0f;
+    // Processa colisões de tiros, dano nos inimigos e drops de O2
+    public static void processarCombate(Array<SlashWave> slashes, Array<Enemy> enemies, GameSaveData saveData) {
+        for (int i = slashes.size - 1; i >= 0; i--) {
+            SlashWave s = slashes.get(i);
 
-    public void update(float delta) {
-        if (cooldown > 0f) cooldown -= delta;
-        if (cooldown < 0f) cooldown = 0f;
+            if (!s.active) {
+                slashes.removeIndex(i);
+                continue;
+            }
 
-        if (reloadCooldown > 0f) {
-            reloadCooldown -= delta;
-            if (reloadCooldown <= 0f) municao = 8; // Recarga concluída
-        }
+            for (Enemy e : enemies) {
+                if (e.ativo && s.rect.overlaps(e.rect)) {
+                    e.hp -= 40;
+                    s.active = false;
 
-        if (isSlashing) {
-            slashTimer -= delta;
-            if (slashTimer <= 0f) isSlashing = false;
-        }
-    }
+                    // Lógica de Morte do Inimigo
+                    if (e.hp <= 0) {
+                        e.ativo = false;
 
-    public boolean tentarTiro(Vector2 origem, InimigoTita alvo, boolean temArma) {
-        if (!temArma || municao <= 0 || cooldown > 0f || reloadCooldown > 0f) return false;
-        if (alvo == null || !alvo.vivo()) return false;
+                        // Drop aleatório de O2 (40% de chance de recuperar 10 de O2)
+                        if (MathUtils.randomBoolean(0.4f)) {
+                            saveData.o2 = Math.min(100, saveData.o2 + 10);
+                        }
+                    }
+                    break;
+                }
+            }
 
-        // Ativa o rastro visual do slash ao atacar
-        isSlashing = true;
-        slashTimer = 0.2f;
-
-        if (origem.dst(alvo.pos) > alcance) {
-            municao--;
-            cooldown = cooldownMax;
-            return false;
-        }
-
-        alvo.hp -= dano;
-        municao--;
-        cooldown = cooldownMax;
-        return true;
-    }
-
-    public void forcarReload() {
-        if (reloadCooldown <= 0f && municao < 8) {
-            reloadCooldown = reloadMax;
+            if (!s.active) {
+                slashes.removeIndex(i);
+            }
         }
     }
 }

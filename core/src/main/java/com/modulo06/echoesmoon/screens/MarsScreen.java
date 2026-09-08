@@ -22,6 +22,7 @@ import com.modulo06.echoesmoon.entities.ItemDrop;
 import com.modulo06.echoesmoon.entities.SlashWave;
 import com.modulo06.echoesmoon.systems.DialogSystem;
 import com.modulo06.echoesmoon.systems.GameSaveData;
+import com.modulo06.echoesmoon.systems.SoundManager;
 
 public class MarsScreen implements Screen {
     private Game game;
@@ -31,60 +32,70 @@ public class MarsScreen implements Screen {
     private ShapeRenderer shapeRenderer;
     private BitmapFont font;
 
-    private Texture fundoTex, alienTex, portalTex, o2Tex, tiroAlienTex, slashTex, playerSheet, npcTex;
+    private Rectangle player, npcRadio, portalTita;
+    private Array<Enemy> enemies;
+    private Array<SlashWave> slashes;
+    private Array<SlashWave> tirosInimigos;
+    private Array<ItemDrop> dropsO2;
+    private DialogSystem dialog;
+
+    private Texture fundoTex, playerSheet, slashTex, alienTex, radioTex, portraitRadio, portalTitaTex, o2Tex;
     private Animation<TextureRegion> playerAnim;
     private float stateTime = 0f;
 
-    private Rectangle player, portalParaTita, npcRect;
-    private Array<Enemy> enemies;
-    private Array<SlashWave> slashes;
-    private Array<ItemDrop> drops;
-
-    private class TiroAlien {
-        Rectangle rect; Vector2 vel; boolean ativo = true;
-        public TiroAlien(float x, float y, Vector2 dir) { rect = new Rectangle(x,y,12,12); vel = dir.nor().scl(200f); }
-        public void update(float delta) { rect.x += vel.x * delta; rect.y += vel.y * delta; }
-    }
-    private Array<TiroAlien> projeteisAlien;
-    private DialogSystem dialog = new DialogSystem();
-
-    private final float WORLD_WIDTH = 1200f;
-    private final float WORLD_HEIGHT = 1200f;
-
-    private float cooldown = 0f, reloadTimer = 0f, avisoTimer = 0f;
-    private int waveState = 1;
-    private float waveTimer = 25f, spawnTimer = 0f;
-    private String mensagemAviso = "";
-
     private boolean wavesIniciadas = false;
-    private boolean titaLiberado = false, mostrarQuest = true;
+    private boolean titaLiberado = false;
+    private int waveState = 1;
+    private int inimigosMortosNaWave = 0;
+    private int totalInimigosNaWave = 5;
+
+    private float spawnTimer = 0f, cooldown = 0f;
+    private float reloadTimer = 0f, avisoTimer = 0f;
+    private String mensagemAviso = "";
+    private boolean isReloading = false;
+
+    // Transição de Fade Overlay
+    private float fadeAlpha = 1.0f;
+    private boolean fadingOut = false;
+    private Screen nextScreen = null;
 
     public MarsScreen(Game game, GameSaveData saveData) {
-        this.game = game; this.saveData = saveData;
-        camera = new OrthographicCamera(); camera.setToOrtho(false, 800, 600);
-        batch = new SpriteBatch(); shapeRenderer = new ShapeRenderer(); font = new BitmapFont();
+        this.game = game;
+        this.saveData = saveData;
+        camera = new OrthographicCamera();
+        camera.setToOrtho(false, 800, 600);
+        batch = new SpriteBatch();
+        shapeRenderer = new ShapeRenderer();
+        font = new BitmapFont();
+        dialog = new DialogSystem();
 
-        player = new Rectangle(300, 300, 32, 48);
-        npcRect = new Rectangle(600, 600, 32, 48); // Posição do NPC
-        portalParaTita = new Rectangle(1000, 1000, 100, 100);
+        player = new Rectangle(400, 300, 32, 48);
+        npcRadio = new Rectangle(200, 200, 64, 64);
+        portalTita = new Rectangle(1000, 500, 100, 100);
 
-        slashes = new Array<>(); drops = new Array<>(); enemies = new Array<>();
-        projeteisAlien = new Array<>();
+        enemies = new Array<>();
+        slashes = new Array<>();
+        tirosInimigos = new Array<>();
+        dropsO2 = new Array<>();
+
         carregarTexturas();
+        SoundManager.playMusic("marte_ambient", true);
     }
 
     private void carregarTexturas() {
-        fundoTex = safeLoad("fundo_marte.png"); alienTex = safeLoad("alien.png");
-        portalTex = safeLoad("portal.png"); o2Tex = safeLoad("o2.png");
-        slashTex = safeLoad("slash_wave.png"); tiroAlienTex = safeLoad("tiro_alien.png");
-        npcTex = safeLoad("npc.png");
-
+        fundoTex = safeLoad("fundo_marte.png");
         playerSheet = safeLoad("player_marte.png");
-        if (playerSheet == null) playerSheet = safeLoad("player_lua.png");
+        slashTex = safeLoad("slash_wave.png");
+        alienTex = safeLoad("alien.png");
+        radioTex = safeLoad("radio.png");
+        portraitRadio = safeLoad("portrait_radio.png");
+        portalTitaTex = safeLoad("portal_tita.png");
+        o2Tex = safeLoad("o2.png");
+
         if (playerSheet != null) {
             TextureRegion[][] tmp = TextureRegion.split(playerSheet, playerSheet.getWidth() / 4, playerSheet.getHeight());
-            TextureRegion[] walkFrames = new TextureRegion[4]; int index = 0;
-            for (int j = 0; j < 4; j++) walkFrames[index++] = tmp[0][j];
+            TextureRegion[] walkFrames = new TextureRegion[4];
+            for (int j = 0; j < 4; j++) walkFrames[j] = tmp[0][j];
             playerAnim = new Animation<>(0.15f, walkFrames);
         }
     }
@@ -97,40 +108,44 @@ public class MarsScreen implements Screen {
     @Override
     public void render(float delta) {
         update(delta);
-        Gdx.gl.glClearColor(0.6f, 0.2f, 0.1f, 1); Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+        Gdx.gl.glClearColor(0.6f, 0.2f, 0.1f, 1);
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
         camera.update();
 
-        // 1. TEXTURAS
-        batch.setProjectionMatrix(camera.combined); batch.begin();
-        if (fundoTex != null) batch.draw(fundoTex, 0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+        batch.setProjectionMatrix(camera.combined);
+        batch.begin();
+        if (fundoTex != null) batch.draw(fundoTex, 0, 0, 1200, 1200);
+        if (radioTex != null) batch.draw(radioTex, npcRadio.x, npcRadio.y, npcRadio.width, npcRadio.height);
 
-        if (!wavesIniciadas) {
-            if (npcTex != null) batch.draw(npcTex, npcRect.x, npcRect.y, npcRect.width, npcRect.height);
-            else font.draw(batch, "[NPC]", npcRect.x, npcRect.y + 60);
+        if (titaLiberado) {
+            if (portalTitaTex != null) batch.draw(portalTitaTex, portalTita.x, portalTita.y, portalTita.width, portalTita.height);
+            font.draw(batch, "PORTAL TITA", portalTita.x + 10, portalTita.y + 120);
         }
 
-        if (titaLiberado && portalTex != null) batch.draw(portalTex, portalParaTita.x, portalParaTita.y, portalParaTita.width, portalParaTita.height);
+        for (ItemDrop d : dropsO2) {
+            if (o2Tex != null) batch.draw(o2Tex, d.rect.x, d.rect.y, d.rect.width, d.rect.height);
+        }
 
-        for (ItemDrop drop : drops) {
-            if (o2Tex != null) batch.draw(o2Tex, drop.rect.x, drop.rect.y, drop.rect.width, drop.rect.height);
-        }
-        for (Enemy e : enemies) {
-            if (e.ativo && alienTex != null) batch.draw(alienTex, e.rect.x, e.rect.y, e.rect.width, e.rect.height);
-        }
-        for (TiroAlien t : projeteisAlien) {
-            if (t.ativo) {
-                Texture tex = tiroAlienTex != null ? tiroAlienTex : o2Tex;
-                if (tex != null) batch.draw(tex, t.rect.x, t.rect.y, t.rect.width, t.rect.height);
+        for (Enemy e : enemies) if (e.ativo && alienTex != null) batch.draw(alienTex, e.rect.x, e.rect.y, e.rect.width, e.rect.height);
+
+        for (SlashWave s : tirosInimigos) {
+            if (s.active && slashTex != null) {
+                batch.setColor(1, 0.2f, 0.2f, 1);
+                batch.draw(slashTex, s.rect.x, s.rect.y, 24, 24, 48, 48, 0.7f, 0.7f, s.angle, 0, 0, slashTex.getWidth(), slashTex.getHeight(), false, false);
+                batch.setColor(1, 1, 1, 1);
             }
         }
         for (SlashWave s : slashes) {
-            if (s.active && slashTex != null) batch.draw(slashTex, s.rect.x, s.rect.y, 32, 32, 64, 64, 1f, 1f, s.angle, 0, 0, slashTex.getWidth(), slashTex.getHeight(), false, false);
+            if (s.active && slashTex != null) batch.draw(slashTex, s.rect.x, s.rect.y, 24, 24, 48, 48, 1f, 1f, s.angle, 0, 0, slashTex.getWidth(), slashTex.getHeight(), false, false);
         }
+
         if (playerAnim != null) batch.draw(playerAnim.getKeyFrame(stateTime, true), player.x, player.y, player.width, player.height);
         else if (playerSheet != null) batch.draw(playerSheet, player.x, player.y, player.width, player.height);
+
+        if (player.overlaps(npcRadio) && !wavesIniciadas && !dialog.isOpen()) font.draw(batch, "[E] LIGAR RADIO", npcRadio.x - 20, npcRadio.y + 80);
+        if (player.overlaps(portalTita) && titaLiberado) font.draw(batch, "[E] IR PARA TITA", portalTita.x, portalTita.y - 20);
         batch.end();
 
-        // 2. BARRAS DE VIDA (ShapeRenderer)
         shapeRenderer.setProjectionMatrix(camera.combined);
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
         for (Enemy e : enemies) {
@@ -138,161 +153,191 @@ public class MarsScreen implements Screen {
                 shapeRenderer.setColor(0.8f, 0f, 0f, 1);
                 shapeRenderer.rect(e.rect.x, e.rect.y + e.rect.height + 5, e.rect.width, 5);
                 shapeRenderer.setColor(0f, 0.8f, 0f, 1);
-                float hpPercent = Math.max(0, e.hp / 100f);
-                shapeRenderer.rect(e.rect.x, e.rect.y + e.rect.height + 5, e.rect.width * hpPercent, 5);
+                shapeRenderer.rect(e.rect.x, e.rect.y + e.rect.height + 5, e.rect.width * Math.max(0, e.hp / (float)e.maxHp), 5);
             }
         }
         shapeRenderer.end();
 
-        desenharHUDL4D();
-    }
-
-    private void desenharHUDL4D() {
-        batch.getProjectionMatrix().setToOrtho2D(0, 0, 1280, 720);
-        Gdx.gl.glEnable(GL20.GL_BLEND);
-        shapeRenderer.setProjectionMatrix(batch.getProjectionMatrix());
-        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
-
-        if (mostrarQuest) {
-            shapeRenderer.setColor(0.05f, 0.05f, 0.05f, 0.6f); shapeRenderer.rect(20, 580, 350, 120);
-            shapeRenderer.setColor(1f, 1f, 1f, 0.8f); shapeRenderer.rectLine(20, 580, 20, 700, 4);
-        }
-
-        shapeRenderer.setColor(0.05f, 0.05f, 0.05f, 0.6f); shapeRenderer.rect(20, 20, 250, 80);
-        shapeRenderer.setColor(0.1f, 0.8f, 0.2f, 1f); shapeRenderer.rect(30, 30, 230 * (Math.max(0, saveData.o2) / 100f), 15);
-
-        // Fundo do Dialog
-        if (dialog.isOpen()) {
-            shapeRenderer.setColor(0f, 0f, 0f, 0.9f); shapeRenderer.rect(200, 500, 880, 150);
-            shapeRenderer.setColor(1f, 1f, 1f, 1f);
-            shapeRenderer.rectLine(200, 500, 1080, 500, 4); shapeRenderer.rectLine(200, 650, 1080, 650, 4);
-            shapeRenderer.rectLine(200, 500, 200, 650, 4); shapeRenderer.rectLine(1080, 500, 1080, 650, 4);
-        }
-        shapeRenderer.end(); Gdx.gl.glDisable(GL20.GL_BLEND);
-
-        batch.begin();
-        font.setColor(1, 1, 1, 1);
-        font.draw(batch, "+ " + (int)Math.max(0, saveData.o2), 30, 75);
-        font.getData().setScale(1.5f);
-        font.draw(batch, (reloadTimer > 0) ? "RECARREGANDO..." : String.valueOf(saveData.municao), 1150, 350);
-        font.getData().setScale(1f);
-
-        if (mostrarQuest) {
-            font.draw(batch, "OBJETIVOS ATUAIS", 40, 680);
-            if (!wavesIniciadas) font.draw(batch, "- Fale com o Comandante (NPC).", 40, 650);
-            else font.draw(batch, "- Sobreviva as ondas (" + (Math.min(waveState, 3)) + "/3).", 40, 650);
-            if (titaLiberado) font.draw(batch, "- Fuja pelo portal para Tita!", 40, 610);
-        }
-
-        font.draw(batch, "[TAB] Ocultar Objetivos | [F5] Salvar", 20, 715);
-        if (avisoTimer > 0) font.draw(batch, mensagemAviso, 600, 100);
-
-        if (dialog.isOpen()) font.draw(batch, "* " + dialog.line(), 230, 600);
-
-        batch.setProjectionMatrix(camera.combined);
-        if (!wavesIniciadas && !dialog.isOpen() && player.overlaps(npcRect)) font.draw(batch, "[E] FALAR", npcRect.x, npcRect.y - 10);
-        if (titaLiberado && player.overlaps(portalParaTita)) font.draw(batch, "[E] IR PARA TITA", portalParaTita.x, portalParaTita.y - 20);
-        batch.end();
+        desenharHUD();
+        desenharFade(delta);
     }
 
     private void update(float delta) {
+        if (fadingOut) return;
+
         if (cooldown > 0f) cooldown -= delta;
         if (avisoTimer > 0f) avisoTimer -= delta;
-        if (reloadTimer > 0f) reloadTimer -= delta;
+        saveData.o2 -= 0.5f * delta;
+        if (saveData.o2 <= 0) game.setScreen(new GameOverScreen(game));
 
-        boolean isTalking = dialog.isOpen();
-        saveData.o2 -= 1.0f * delta;
-        if (saveData.o2 <= 0) { game.setScreen(new GameOverScreen(game)); return; }
-
-        if (Gdx.input.isKeyJustPressed(Input.Keys.TAB)) mostrarQuest = !mostrarQuest;
-        if (Gdx.input.isKeyJustPressed(Input.Keys.F5)) { saveData.salvar(); mensagemAviso = "JOGO SALVO!"; avisoTimer = 2.0f; }
-        if (Gdx.input.isKeyJustPressed(Input.Keys.R) && reloadTimer <= 0f && saveData.municao < 25) { saveData.municao = 25; reloadTimer = 2.0f; }
-
-        if (isTalking) {
-            if (Gdx.input.isKeyJustPressed(Input.Keys.E) || Gdx.input.isKeyJustPressed(Input.Keys.SPACE)) {
+        if (dialog.isOpen()) {
+            if (Gdx.input.isKeyJustPressed(Input.Keys.E) || Gdx.input.isKeyJustPressed(Input.Keys.ENTER)) {
                 dialog.next();
-                if (!dialog.isOpen()) wavesIniciadas = true; // Inicia as waves ao fechar o dialogo
+                if (!dialog.isOpen() && player.overlaps(npcRadio)) wavesIniciadas = true;
             }
-        } else {
-            // Movimentação do Jogador
-            boolean moving = false;
-            if (Gdx.input.isKeyPressed(Input.Keys.A)) { player.x -= 300 * delta; moving = true; }
-            if (Gdx.input.isKeyPressed(Input.Keys.D)) { player.x += 300 * delta; moving = true; }
-            if (Gdx.input.isKeyPressed(Input.Keys.W)) { player.y += 300 * delta; moving = true; }
-            if (Gdx.input.isKeyPressed(Input.Keys.S)) { player.y -= 300 * delta; moving = true; }
-            if (moving) stateTime += delta;
+            return;
+        }
 
-            player.x = MathUtils.clamp(player.x, 0, WORLD_WIDTH - player.width);
-            player.y = MathUtils.clamp(player.y, 0, WORLD_HEIGHT - player.height);
-            camera.position.set(player.x, player.y, 0);
+        // Checkpoint e Salvamento por F5
+        if (Gdx.input.isKeyJustPressed(Input.Keys.F5)) {
+            saveData.fase = "MARTE";
+            saveData.salvar();
+            mensagemAviso = "CHECKPOINT SALVO EM MARTE!";
+            avisoTimer = 2.0f;
+        }
 
-            // Interação com NPC
-            if (!wavesIniciadas && player.overlaps(npcRect) && Gdx.input.isKeyJustPressed(Input.Keys.E)) {
-                dialog.start(new String[]{
-                    "ATENCAO RECRUTA! Os alienigenas detectaram nossa presenca.",
-                    "Eles atacarao em 3 grandes ondas de choque.",
-                    "Nao deixe que destruam seu traje. Sobreviva e fuja!"
-                });
+        if (Gdx.input.isKeyJustPressed(Input.Keys.R) && !isReloading && saveData.municao < 25) {
+            isReloading = true; reloadTimer = 1.5f; mensagemAviso = "RECARREGANDO..."; avisoTimer = 1.5f;
+            SoundManager.playSound("reload");
+        }
+        if (isReloading) {
+            reloadTimer -= delta;
+            if (reloadTimer <= 0) { isReloading = false; saveData.municao = 25; mensagemAviso = "MUNICÃO RECARREGADA!"; avisoTimer = 2f; }
+        }
+
+        boolean moving = false;
+        if (Gdx.input.isKeyPressed(Input.Keys.A)) { player.x -= 300 * delta; moving = true; }
+        if (Gdx.input.isKeyPressed(Input.Keys.D)) { player.x += 300 * delta; moving = true; }
+        if (Gdx.input.isKeyPressed(Input.Keys.W)) { player.y += 300 * delta; moving = true; }
+        if (Gdx.input.isKeyPressed(Input.Keys.S)) { player.y -= 300 * delta; moving = true; }
+        if (moving) stateTime += delta;
+
+        player.x = MathUtils.clamp(player.x, 0, 1200 - player.width);
+        player.y = MathUtils.clamp(player.y, 0, 1200 - player.height);
+        camera.position.set(player.x, player.y, 0);
+
+        for (int i = dropsO2.size - 1; i >= 0; i--) {
+            ItemDrop d = dropsO2.get(i);
+            if (player.overlaps(d.rect)) {
+                saveData.o2 = Math.min(100, saveData.o2 + 10);
+                SoundManager.playSound("pickup");
+                mensagemAviso = "+10 O2 COLETADO!"; avisoTimer = 1.5f;
+                dropsO2.removeIndex(i);
             }
+        }
 
-            // Lógica das Waves
-            if (wavesIniciadas && waveState <= 3) {
-                waveTimer -= delta; spawnTimer += delta;
-                if (spawnTimer >= 1.5f - (waveState * 0.2f)) {
-                    enemies.add(new Enemy(MathUtils.random(100, WORLD_WIDTH - 100), MathUtils.random(100, WORLD_HEIGHT - 100), 0));
-                    spawnTimer = 0f;
-                }
-                if (waveTimer <= 0) {
-                    waveState++; waveTimer = 25f;
-                    if (waveState > 3) { titaLiberado = true; mensagemAviso = "PORTAL TITA ABERTO!"; avisoTimer = 4f; }
-                }
+        if (!wavesIniciadas && player.overlaps(npcRadio) && Gdx.input.isKeyJustPressed(Input.Keys.E)) {
+            dialog.start(new String[]{
+                "Aqui é o Oficial! O portal para Titã esta instavel.",
+                "Os Aliens Marcianos atiram projeteis! Cuidado!",
+                "Ao elimina-los, eles derrubam tanques de O2 no chão!",
+                "Quando eliminar todos, Vá para o Portal de Titã"
+            }, portraitRadio);
+        }
+
+        if (wavesIniciadas && waveState <= 3) {
+            spawnTimer += delta;
+            if (spawnTimer >= 1.5f && enemies.size < totalInimigosNaWave - inimigosMortosNaWave) {
+                enemies.add(new Enemy(MathUtils.random(100, 1100), MathUtils.random(100, 1100), 1));
+                spawnTimer = 0f;
             }
+            if (inimigosMortosNaWave >= totalInimigosNaWave) {
+                waveState++; inimigosMortosNaWave = 0; totalInimigosNaWave += 3;
+                if (waveState > 3) titaLiberado = true;
+            }
+        }
 
-            // IA e Colisões
+        if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && saveData.municao > 0 && cooldown <= 0f && !isReloading) {
+            saveData.municao--; cooldown = 0.25f;
+            SoundManager.playSound("slash");
+            Vector3 m = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+            camera.unproject(m); slashes.add(new SlashWave(player.x, player.y, m.x, m.y));
+        }
+
+        for (int i = slashes.size - 1; i >= 0; i--) {
+            SlashWave s = slashes.get(i); s.update(delta);
+            if (!s.active) { slashes.removeIndex(i); continue; }
             for (Enemy e : enemies) {
-                if (e.ativo) {
-                    Vector2 dir = new Vector2(player.x - e.rect.x, player.y - e.rect.y);
-                    if (dir.len() > 0) { e.rect.x += dir.nor().x * 55 * delta; e.rect.y += dir.nor().y * 55 * delta; }
-                    if (MathUtils.random() < 0.01f) projeteisAlien.add(new TiroAlien(e.rect.x, e.rect.y, new Vector2(player.x - e.rect.x, player.y - e.rect.y)));
-                    if (e.rect.overlaps(player)) saveData.o2 -= 10f * delta;
-                }
-            }
-
-            for (int i = projeteisAlien.size - 1; i >= 0; i--) {
-                TiroAlien t = projeteisAlien.get(i); t.update(delta);
-                if (t.rect.overlaps(player)) { saveData.o2 -= 10f; t.ativo = false; projeteisAlien.removeIndex(i); }
-            }
-
-            if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && saveData.municao > 0 && cooldown <= 0f && reloadTimer <= 0f) {
-                saveData.municao--; cooldown = 0.25f;
-                Vector3 m = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
-                camera.unproject(m); slashes.add(new SlashWave(player.x, player.y, m.x, m.y));
-            }
-
-            for (int i = slashes.size - 1; i >= 0; i--) {
-                SlashWave s = slashes.get(i); s.update(delta);
-                if (!s.active) { slashes.removeIndex(i); continue; }
-                for (Enemy e : enemies) {
-                    if (e.ativo && s.rect.overlaps(e.rect)) {
-                        e.hp -= 40; s.active = false;
-                        if (e.hp <= 0) {
-                            e.ativo = false;
-                            if (MathUtils.randomBoolean(0.3f)) drops.add(new ItemDrop(e.rect.x, e.rect.y, 0));
-                        }
-                        break;
+                if (e.ativo && s.rect.overlaps(e.rect)) {
+                    e.hp -= 40; s.active = false;
+                    if (e.hp <= 0) {
+                        e.ativo = false; inimigosMortosNaWave++;
+                        if (MathUtils.randomBoolean(0.5f)) dropsO2.add(new ItemDrop(e.rect.x, e.rect.y, 0));
                     }
                 }
             }
+        }
 
-            for (int i = drops.size - 1; i >= 0; i--) {
-                ItemDrop drop = drops.get(i);
-                if (player.overlaps(drop.rect)) { saveData.o2 = Math.min(100, saveData.o2 + 15); drops.removeIndex(i); }
-            }
+        for (int i = enemies.size - 1; i >= 0; i--) {
+            Enemy e = enemies.get(i);
+            if (e.ativo) {
+                e.update(delta, new Vector2(player.x, player.y));
+                if (e.cooldownTiro <= 0 && new Vector2(player.x - e.rect.x, player.y - e.rect.y).len() < 500f) {
+                    tirosInimigos.add(new SlashWave(e.rect.x, e.rect.y, player.x, player.y));
+                    e.cooldownTiro = 2.5f;
+                }
+                if (e.rect.overlaps(player)) saveData.o2 -= 10f * delta;
+            } else enemies.removeIndex(i);
+        }
 
-            if (titaLiberado && Gdx.input.isKeyJustPressed(Input.Keys.E) && player.overlaps(portalParaTita)) {
-                saveData.fase = "TITA"; saveData.salvar(); game.setScreen(new TitanScreen(game, saveData));
+        for (int i = tirosInimigos.size - 1; i >= 0; i--) {
+            SlashWave s = tirosInimigos.get(i); s.update(delta);
+            if (s.rect.overlaps(player)) { saveData.o2 -= 10f; s.active = false; }
+            if (!s.active) tirosInimigos.removeIndex(i);
+        }
+
+        if (titaLiberado && player.overlaps(portalTita) && Gdx.input.isKeyJustPressed(Input.Keys.E)) {
+            SoundManager.playSound("portal");
+            saveData.fase = "TITA"; saveData.salvar();
+            fadingOut = true;
+            nextScreen = new TitanScreen(game, saveData);
+        }
+    }
+
+    private void desenharHUD() {
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, 1280, 720);
+        shapeRenderer.setProjectionMatrix(batch.getProjectionMatrix());
+
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        shapeRenderer.setColor(0.05f, 0.05f, 0.05f, 0.8f);
+        shapeRenderer.rect(20, 20, 250, 100);
+        shapeRenderer.setColor(0.1f, 0.5f, 0.8f, 1f);
+        shapeRenderer.rect(30, 30, 230 * (Math.max(0, saveData.o2) / 100f), 15);
+
+        if (wavesIniciadas && waveState <= 3) {
+            shapeRenderer.setColor(0.2f, 0.2f, 0.2f, 1f); shapeRenderer.rect(440, 680, 400, 20);
+            shapeRenderer.setColor(0.8f, 0.1f, 0.1f, 1f);
+            shapeRenderer.rect(440, 680, 400 * ((float) inimigosMortosNaWave / totalInimigosNaWave), 20);
+        }
+        shapeRenderer.end();
+
+        batch.begin();
+        font.setColor(1, 1, 1, 1);
+        font.draw(batch, "O2: " + (int)Math.max(0, saveData.o2), 30, 75);
+        font.draw(batch, "MUNICÃO: " + saveData.municao, 30, 95);
+        font.draw(batch, "PLANETA: MARTE", 30, 115);
+
+        font.draw(batch, "[TAB] Ocultar Objetivos | [F5] Salvar Checkpoint | [R] Recarregar", 20, 715);
+
+        if (isReloading) font.draw(batch, "RECARREGANDO...", 130, 95);
+        if (avisoTimer > 0) font.draw(batch, mensagemAviso, 550, 100);
+
+        if (wavesIniciadas && waveState <= 3) font.draw(batch, "ONDA " + waveState + " - INIMIGOS RESTANTES: " + (totalInimigosNaWave - inimigosMortosNaWave), 450, 670);
+        else if (titaLiberado) font.draw(batch, "SISTEMA SEGURO. PORTAL LIBERADO.", 500, 690);
+        batch.end();
+
+        dialog.render(batch, shapeRenderer, font);
+    }
+
+    private void desenharFade(float delta) {
+        if (fadeAlpha > 0 || fadingOut) {
+            if (fadingOut) fadeAlpha = Math.min(1.0f, fadeAlpha + delta * 2f);
+            else fadeAlpha = Math.max(0.0f, fadeAlpha - delta * 2f);
+
+            Gdx.gl.glEnable(GL20.GL_BLEND);
+            shapeRenderer.getProjectionMatrix().setToOrtho2D(0, 0, 1280, 720);
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+            shapeRenderer.setColor(0, 0, 0, fadeAlpha);
+            shapeRenderer.rect(0, 0, 1280, 720);
+            shapeRenderer.end();
+            Gdx.gl.glDisable(GL20.GL_BLEND);
+
+            if (fadingOut && fadeAlpha >= 1.0f && nextScreen != null) {
+                game.setScreen(nextScreen);
             }
         }
     }
-    @Override public void show(){} @Override public void resize(int w, int h){} @Override public void pause(){} @Override public void resume(){} @Override public void hide(){} @Override public void dispose(){}
+
+    @Override public void show() {} @Override public void resize(int w, int h) {}
+    @Override public void pause() {} @Override public void resume() {} @Override public void hide() {} @Override public void dispose() {}
 }
