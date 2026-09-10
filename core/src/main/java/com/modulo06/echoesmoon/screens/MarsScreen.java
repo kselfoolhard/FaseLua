@@ -39,9 +39,15 @@ public class MarsScreen implements Screen {
     private Array<ItemDrop> dropsO2;
     private DialogSystem dialog;
 
-    private Texture fundoTex, playerSheet, slashTex, alienTex, radioTex, portraitRadio, portalTitaTex, o2Tex;
-    private Animation<TextureRegion> playerAnim;
+    private Texture fundoTex, slashTex, alienTex, radioTex, portraitRadio, portalTitaTex, o2Tex;
+
+    // Variáveis de Animação e Estado
+    private Animation<TextureRegion> animIdle, animWalk, animSlash;
+    private int estadoJogador = 0;
+    private float slashAnimTimer = 0f;
+    private float timerPasso = 0f;
     private float stateTime = 0f;
+    private float somEnemyTimer = 0f; // Timer para som do alien
 
     private boolean wavesIniciadas = false;
     private boolean titaLiberado = false;
@@ -54,7 +60,6 @@ public class MarsScreen implements Screen {
     private String mensagemAviso = "";
     private boolean isReloading = false;
 
-    // Transição de Fade Overlay
     private float fadeAlpha = 1.0f;
     private boolean fadingOut = false;
     private Screen nextScreen = null;
@@ -79,12 +84,11 @@ public class MarsScreen implements Screen {
         dropsO2 = new Array<>();
 
         carregarTexturas();
-        SoundManager.playMusic("marte_ambient", true);
+        SoundManager.playMusic("marte", true);
     }
 
     private void carregarTexturas() {
         fundoTex = safeLoad("fundo_marte.png");
-        playerSheet = safeLoad("player_marte.png");
         slashTex = safeLoad("slash_wave.png");
         alienTex = safeLoad("alien.png");
         radioTex = safeLoad("radio.png");
@@ -92,12 +96,14 @@ public class MarsScreen implements Screen {
         portalTitaTex = safeLoad("portal_tita.png");
         o2Tex = safeLoad("o2.png");
 
-        if (playerSheet != null) {
-            TextureRegion[][] tmp = TextureRegion.split(playerSheet, playerSheet.getWidth() / 4, playerSheet.getHeight());
-            TextureRegion[] walkFrames = new TextureRegion[4];
-            for (int j = 0; j < 4; j++) walkFrames[j] = tmp[0][j];
-            playerAnim = new Animation<>(0.15f, walkFrames);
-        }
+        Texture idleTex = safeLoad("player_lunar.png");
+        Texture walkTex = safeLoad("player_lunar_walk.png");
+        Texture slashTexAnim = safeLoad("player_lunar_slash.png");
+
+        if (idleTex != null) animIdle = new Animation<>(0.2f, TextureRegion.split(idleTex, idleTex.getWidth() / 4, idleTex.getHeight())[0]);
+        if (walkTex != null) animWalk = new Animation<>(0.12f, TextureRegion.split(walkTex, walkTex.getWidth() / 4, walkTex.getHeight())[0]);
+        // Correção de frame (dividido por 4)
+        if (slashTexAnim != null) animSlash = new Animation<>(0.1f, TextureRegion.split(slashTexAnim, slashTexAnim.getWidth() / 4, slashTexAnim.getHeight())[0]);
     }
 
     private Texture safeLoad(String path) {
@@ -122,10 +128,7 @@ public class MarsScreen implements Screen {
             font.draw(batch, "PORTAL TITA", portalTita.x + 10, portalTita.y + 120);
         }
 
-        for (ItemDrop d : dropsO2) {
-            if (o2Tex != null) batch.draw(o2Tex, d.rect.x, d.rect.y, d.rect.width, d.rect.height);
-        }
-
+        for (ItemDrop d : dropsO2) if (o2Tex != null) batch.draw(o2Tex, d.rect.x, d.rect.y, d.rect.width, d.rect.height);
         for (Enemy e : enemies) if (e.ativo && alienTex != null) batch.draw(alienTex, e.rect.x, e.rect.y, e.rect.width, e.rect.height);
 
         for (SlashWave s : tirosInimigos) {
@@ -135,12 +138,14 @@ public class MarsScreen implements Screen {
                 batch.setColor(1, 1, 1, 1);
             }
         }
-        for (SlashWave s : slashes) {
-            if (s.active && slashTex != null) batch.draw(slashTex, s.rect.x, s.rect.y, 24, 24, 48, 48, 1f, 1f, s.angle, 0, 0, slashTex.getWidth(), slashTex.getHeight(), false, false);
-        }
+        for (SlashWave s : slashes) if (s.active && slashTex != null) batch.draw(slashTex, s.rect.x, s.rect.y, 24, 24, 48, 48, 1f, 1f, s.angle, 0, 0, slashTex.getWidth(), slashTex.getHeight(), false, false);
 
-        if (playerAnim != null) batch.draw(playerAnim.getKeyFrame(stateTime, true), player.x, player.y, player.width, player.height);
-        else if (playerSheet != null) batch.draw(playerSheet, player.x, player.y, player.width, player.height);
+        TextureRegion frameAtual = null;
+        if (estadoJogador == 2 && animSlash != null) frameAtual = animSlash.getKeyFrame(stateTime, false);
+        else if (estadoJogador == 1 && animWalk != null) frameAtual = animWalk.getKeyFrame(stateTime, true);
+        else if (animIdle != null) frameAtual = animIdle.getKeyFrame(stateTime, true);
+
+        if (frameAtual != null) batch.draw(frameAtual, player.x, player.y, player.width, player.height);
 
         if (player.overlaps(npcRadio) && !wavesIniciadas && !dialog.isOpen()) font.draw(batch, "[E] LIGAR RADIO", npcRadio.x - 20, npcRadio.y + 80);
         if (player.overlaps(portalTita) && titaLiberado) font.draw(batch, "[E] IR PARA TITA", portalTita.x, portalTita.y - 20);
@@ -165,6 +170,7 @@ public class MarsScreen implements Screen {
     private void update(float delta) {
         if (fadingOut) return;
 
+        if (somEnemyTimer > 0f) somEnemyTimer -= delta;
         if (cooldown > 0f) cooldown -= delta;
         if (avisoTimer > 0f) avisoTimer -= delta;
         saveData.o2 -= 0.5f * delta;
@@ -173,17 +179,17 @@ public class MarsScreen implements Screen {
         if (dialog.isOpen()) {
             if (Gdx.input.isKeyJustPressed(Input.Keys.E) || Gdx.input.isKeyJustPressed(Input.Keys.ENTER)) {
                 dialog.next();
-                if (!dialog.isOpen() && player.overlaps(npcRadio)) wavesIniciadas = true;
+                if (!dialog.isOpen() && player.overlaps(npcRadio) && !wavesIniciadas) {
+                    wavesIniciadas = true;
+                    SoundManager.playMusic("horda", true);
+                }
             }
             return;
         }
 
-        // Checkpoint e Salvamento por F5
         if (Gdx.input.isKeyJustPressed(Input.Keys.F5)) {
-            saveData.fase = "MARTE";
-            saveData.salvar();
-            mensagemAviso = "CHECKPOINT SALVO EM MARTE!";
-            avisoTimer = 2.0f;
+            saveData.fase = "MARTE"; saveData.salvar();
+            mensagemAviso = "CHECKPOINT SALVO EM MARTE!"; avisoTimer = 2.0f;
         }
 
         if (Gdx.input.isKeyJustPressed(Input.Keys.R) && !isReloading && saveData.municao < 25) {
@@ -195,12 +201,31 @@ public class MarsScreen implements Screen {
             if (reloadTimer <= 0) { isReloading = false; saveData.municao = 25; mensagemAviso = "MUNICÃO RECARREGADA!"; avisoTimer = 2f; }
         }
 
+        if (estadoJogador == 2) {
+            slashAnimTimer -= delta;
+            if (slashAnimTimer <= 0) estadoJogador = 0;
+        }
+
         boolean moving = false;
         if (Gdx.input.isKeyPressed(Input.Keys.A)) { player.x -= 300 * delta; moving = true; }
         if (Gdx.input.isKeyPressed(Input.Keys.D)) { player.x += 300 * delta; moving = true; }
         if (Gdx.input.isKeyPressed(Input.Keys.W)) { player.y += 300 * delta; moving = true; }
         if (Gdx.input.isKeyPressed(Input.Keys.S)) { player.y -= 300 * delta; moving = true; }
-        if (moving) stateTime += delta;
+        stateTime += delta;
+
+        if (estadoJogador != 2) {
+            if (moving) {
+                estadoJogador = 1;
+                timerPasso -= delta;
+                if (timerPasso <= 0) {
+                    SoundManager.playSound(MathUtils.randomBoolean() ? "footstep1" : "footstep2");
+                    timerPasso = 0.35f;
+                }
+            } else {
+                estadoJogador = 0;
+                timerPasso = 0f;
+            }
+        }
 
         player.x = MathUtils.clamp(player.x, 0, 1200 - player.width);
         player.y = MathUtils.clamp(player.y, 0, 1200 - player.height);
@@ -229,15 +254,25 @@ public class MarsScreen implements Screen {
             spawnTimer += delta;
             if (spawnTimer >= 1.5f && enemies.size < totalInimigosNaWave - inimigosMortosNaWave) {
                 enemies.add(new Enemy(MathUtils.random(100, 1100), MathUtils.random(100, 1100), 1));
+                if (somEnemyTimer <= 0) {
+                    SoundManager.playSound("enemy");
+                    somEnemyTimer = 25f; // Limite de áudio
+                }
                 spawnTimer = 0f;
             }
             if (inimigosMortosNaWave >= totalInimigosNaWave) {
                 waveState++; inimigosMortosNaWave = 0; totalInimigosNaWave += 3;
-                if (waveState > 3) titaLiberado = true;
+                if (waveState > 3) {
+                    titaLiberado = true;
+                    SoundManager.playMusic("marte", true);
+                }
             }
         }
 
         if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && saveData.municao > 0 && cooldown <= 0f && !isReloading) {
+            estadoJogador = 2;
+            slashAnimTimer = 0.3f;
+            stateTime = 0f;
             saveData.municao--; cooldown = 0.25f;
             SoundManager.playSound("slash");
             Vector3 m = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
@@ -277,10 +312,8 @@ public class MarsScreen implements Screen {
         }
 
         if (titaLiberado && player.overlaps(portalTita) && Gdx.input.isKeyJustPressed(Input.Keys.E)) {
-            SoundManager.playSound("portal");
             saveData.fase = "TITA"; saveData.salvar();
-            fadingOut = true;
-            nextScreen = new TitanScreen(game, saveData);
+            fadingOut = true; nextScreen = new TitanScreen(game, saveData);
         }
     }
 

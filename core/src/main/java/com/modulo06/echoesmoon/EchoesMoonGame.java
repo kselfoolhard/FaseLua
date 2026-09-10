@@ -2,7 +2,10 @@ package com.modulo06.echoesmoon;
 
 import com.badlogic.gdx.Game;
 import com.badlogic.gdx.assets.AssetManager;
+import com.modulo06.echoesmoon.screens.IntroScreen;
 import com.modulo06.echoesmoon.screens.MenuScreen;
+import com.modulo06.echoesmoon.systems.GameSaveData;
+import com.modulo06.echoesmoon.systems.SoundManager;
 
 public class EchoesMoonGame extends Game {
 
@@ -11,8 +14,8 @@ public class EchoesMoonGame extends Game {
 
     @Override
     public void create() {
-        assets = new AssetManager();
-        this.setScreen(new MenuScreen(this));
+        SoundManager.carregarSonsPadrao(); // << CARREGA OS SONS NA MEMÓRIA
+        setScreen(new IntroScreen(this, new GameSaveData()));
     }
 
     @Override

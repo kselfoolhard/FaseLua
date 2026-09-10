@@ -31,9 +31,15 @@ public class GameScreen implements Screen {
     private ShapeRenderer shapeRenderer;
     private BitmapFont font;
 
-    private Texture fundoLuaTex, portalTex, slashTex, bancadaTex, alienTex, playerSheet, portraitOficial, npcTex, baseTex, caixaTex;
-    private Animation<TextureRegion> playerAnim;
+    private Texture fundoLuaTex, portalTex, slashTex, bancadaTex, alienTex, portraitOficial, npcTex, baseTex, caixaTex;
+
+    // Variáveis de Animação e Estado
+    private Animation<TextureRegion> animIdle, animWalk, animSlash;
+    private int estadoJogador = 0; // 0=IDLE, 1=WALK, 2=SLASH
+    private float slashAnimTimer = 0f;
+    private float timerPasso = 0f;
     private float stateTime = 0f;
+    private float somEnemyTimer = 0f; // Timer para limitar spam do enemy.wav
 
     private Rectangle player, portalParaMarte, bancada, zonaInteracao, npcLua, safeZone;
     private Array<SlashWave> slashes;
@@ -56,7 +62,6 @@ public class GameScreen implements Screen {
     private int caixasColetadas = 0;
     private final int CAIXAS_NECESSARIAS = 3;
 
-    // Sistema de Fade Overlay
     private float fadeAlpha = 1.0f;
     private boolean fadingOut = false;
     private Screen nextScreen = null;
@@ -76,7 +81,6 @@ public class GameScreen implements Screen {
         bancada = new Rectangle(500, 400, 64, 64);
         zonaInteracao = new Rectangle(bancada.x - 20, bancada.y - 20, bancada.width + 40, bancada.height + 40);
 
-        // Oficial com proporção corrigida (aumentado sem achatar)
         npcLua = new Rectangle(250, 350, 36, 54);
         safeZone = new Rectangle(180, 280, 160, 160);
 
@@ -86,8 +90,7 @@ public class GameScreen implements Screen {
         caixasCrafting = new Array<>();
 
         carregarTexturas();
-        carregarSons();
-        SoundManager.playMusic("lua_ambient", true);
+        SoundManager.playMusic("lua", true);
     }
 
     private void carregarTexturas() {
@@ -96,26 +99,19 @@ public class GameScreen implements Screen {
         slashTex = safeLoad("slash_wave.png");
         bancadaTex = safeLoad("bancada.png");
         alienTex = safeLoad("alien_lunar.png");
-        playerSheet = safeLoad("player_lunar.png");
         portraitOficial = safeLoad("portrait_oficial.png");
         npcTex = safeLoad("npc.png");
         baseTex = safeLoad("base.png");
         caixaTex = safeLoad("item.png");
 
-        if (playerSheet != null) {
-            TextureRegion[][] tmp = TextureRegion.split(playerSheet, playerSheet.getWidth() / 4, playerSheet.getHeight());
-            TextureRegion[] walkFrames = new TextureRegion[4];
-            for (int j = 0; j < 4; j++) walkFrames[j] = tmp[0][j];
-            playerAnim = new Animation<>(0.15f, walkFrames);
-        }
-    }
+        Texture idleTex = safeLoad("player_lunar.png");
+        Texture walkTex = safeLoad("player_lunar_walk.png");
+        Texture slashTexAnim = safeLoad("player_lunar_slash.png"); // Imagem agora processada corretamente em 4 frames
 
-    private void carregarSons() {
-        SoundManager.loadSound("slash", "sounds/slash.wav");
-        SoundManager.loadSound("pickup", "sounds/pickup.wav");
-        SoundManager.loadSound("reload", "sounds/reload.wav");
-        SoundManager.loadSound("portal", "sounds/portal.wav");
-        SoundManager.loadMusic("lua_ambient", "sounds/lua_bgm.mp3");
+        if (idleTex != null) animIdle = new Animation<>(0.2f, TextureRegion.split(idleTex, idleTex.getWidth() / 4, idleTex.getHeight())[0]);
+        if (walkTex != null) animWalk = new Animation<>(0.12f, TextureRegion.split(walkTex, walkTex.getWidth() / 4, walkTex.getHeight())[0]);
+        // Correção: Dividido por 4 frames conforme o sprite sheet
+        if (slashTexAnim != null) animSlash = new Animation<>(0.1f, TextureRegion.split(slashTexAnim, slashTexAnim.getWidth() / 4, slashTexAnim.getHeight())[0]);
     }
 
     private Texture safeLoad(String path) {
@@ -130,6 +126,11 @@ public class GameScreen implements Screen {
 
         for (int i = 0; i < 5; i++) {
             enemies.add(new Enemy(MathUtils.random(500, 1100), MathUtils.random(500, 1100), 0));
+        }
+
+        if (somEnemyTimer <= 0) {
+            SoundManager.playSound("enemy");
+            somEnemyTimer = 25f;
         }
     }
 
@@ -148,34 +149,24 @@ public class GameScreen implements Screen {
         if (bancadaTex != null) batch.draw(bancadaTex, bancada.x, bancada.y, bancada.width, bancada.height);
         if (npcTex != null) batch.draw(npcTex, npcLua.x, npcLua.y, npcLua.width, npcLua.height);
 
-        for (ItemDrop caixa : caixasCrafting) {
-            if (caixaTex != null) batch.draw(caixaTex, caixa.rect.x, caixa.rect.y, caixa.rect.width, caixa.rect.height);
-        }
+        for (ItemDrop caixa : caixasCrafting) if (caixaTex != null) batch.draw(caixaTex, caixa.rect.x, caixa.rect.y, caixa.rect.width, caixa.rect.height);
+        for (Enemy e : enemies) if (e.ativo && alienTex != null) batch.draw(alienTex, e.rect.x, e.rect.y, e.rect.width, e.rect.height);
+        for (SlashWave s : slashes) if (s.active && slashTex != null) batch.draw(slashTex, s.rect.x, s.rect.y, 24, 24, 48, 48, 1f, 1f, s.angle, 0, 0, slashTex.getWidth(), slashTex.getHeight(), false, false);
 
-        for (Enemy e : enemies) {
-            if (e.ativo && alienTex != null) batch.draw(alienTex, e.rect.x, e.rect.y, e.rect.width, e.rect.height);
-        }
+        TextureRegion frameAtual = null;
+        if (estadoJogador == 2 && animSlash != null) frameAtual = animSlash.getKeyFrame(stateTime, false);
+        else if (estadoJogador == 1 && animWalk != null) frameAtual = animWalk.getKeyFrame(stateTime, true);
+        else if (animIdle != null) frameAtual = animIdle.getKeyFrame(stateTime, true);
 
-        for (SlashWave s : slashes) {
-            if (s.active && slashTex != null) batch.draw(slashTex, s.rect.x, s.rect.y, 24, 24, 48, 48, 1f, 1f, s.angle, 0, 0, slashTex.getWidth(), slashTex.getHeight(), false, false);
-        }
+        if (frameAtual != null) batch.draw(frameAtual, player.x, player.y, player.width, player.height);
 
-        if (playerAnim != null) batch.draw(playerAnim.getKeyFrame(stateTime, true), player.x, player.y, player.width, player.height);
-        else if (playerSheet != null) batch.draw(playerSheet, player.x, player.y, player.width, player.height);
-
-        if (player.overlaps(npcLua) && !dialog.isOpen()) font.draw(batch, "[E] FALAR COM OFICIAL", npcLua.x - 30, npcLua.y + 80);
-
+        if (player.overlaps(npcLua) && !dialog.isOpen()) font.draw(batch, "[E] FALAR COM OFICIAL", npcLua.x - 30, npcLua.y + 57);
         if (player.overlaps(zonaInteracao) && craftingProgress == 0 && !dialog.isOpen()) {
-            if (!armaCraftada) {
-                font.draw(batch, caixasColetadas >= CAIXAS_NECESSARIAS ? "SEGURE [E] PARA CRAFTAR SLASHWAVE" : "COLETE " + caixasColetadas + "/" + CAIXAS_NECESSARIAS + " PEÇAS!", bancada.x - 40, bancada.y - 10);
-            } else {
-                font.draw(batch, "[E] RECARREGAR MUNIÇÃO", bancada.x - 20, bancada.y - 10);
-            }
+            if (!armaCraftada) font.draw(batch, caixasColetadas >= CAIXAS_NECESSARIAS ? "SEGURE [E] PARA CRAFTAR SLASHWAVE" : "COLETE " + caixasColetadas + "/" + CAIXAS_NECESSARIAS + " PEÇAS!", bancada.x - 40, bancada.y - 10);
+            else font.draw(batch, "[E] RECARREGAR MUNIÇÃO", bancada.x - 20, bancada.y - 10);
         }
 
-        if (player.overlaps(portalParaMarte)) {
-            font.draw(batch, armaCraftada ? "[E] IR PARA MARTE" : "PORTAL BLOQUEADO (REQUER SLASHWAVE)", portalParaMarte.x - 20, portalParaMarte.y - 20);
-        }
+        if (player.overlaps(portalParaMarte)) font.draw(batch, armaCraftada ? "[E] IR PARA MARTE" : "PORTAL BLOQUEADO (REQUER SLASHWAVE)", portalParaMarte.x - 20, portalParaMarte.y - 20);
 
         batch.end();
 
@@ -267,14 +258,12 @@ public class GameScreen implements Screen {
     private void update(float delta) {
         if (fadingOut) return;
 
+        if (somEnemyTimer > 0f) somEnemyTimer -= delta;
         if (cooldown > 0f) cooldown -= delta;
         if (avisoTimer > 0f) avisoTimer -= delta;
 
-        if (player.overlaps(safeZone)) {
-            saveData.o2 = Math.min(100f, saveData.o2 + 15f * delta);
-        } else {
-            saveData.o2 -= 0.5f * delta;
-        }
+        if (player.overlaps(safeZone)) saveData.o2 = Math.min(100f, saveData.o2 + 15f * delta);
+        else saveData.o2 -= 0.5f * delta;
 
         if (saveData.o2 <= 0) game.setScreen(new GameOverScreen(game));
 
@@ -283,10 +272,7 @@ public class GameScreen implements Screen {
                 dialog.next();
                 if (!dialog.isOpen() && player.overlaps(npcLua)) {
                     falouOficial = true;
-                    if (!caixasSpawnadas) {
-                        gerarCaixasEInimigos();
-                        caixasSpawnadas = true;
-                    }
+                    if (!caixasSpawnadas) { gerarCaixasEInimigos(); caixasSpawnadas = true; }
                 }
             }
             return;
@@ -294,12 +280,9 @@ public class GameScreen implements Screen {
 
         if (Gdx.input.isKeyJustPressed(Input.Keys.TAB)) mostrarQuest = !mostrarQuest;
 
-        // Tecla F5 padronizada para salvar o progresso atual
         if (Gdx.input.isKeyJustPressed(Input.Keys.F5)) {
-            saveData.fase = "LUA";
-            saveData.salvar();
-            mensagemAviso = "CHECKPOINT SALVO NA LUA!";
-            avisoTimer = 2.0f;
+            saveData.fase = "LUA"; saveData.salvar();
+            mensagemAviso = "CHECKPOINT SALVO NA LUA!"; avisoTimer = 2.0f;
         }
 
         if (player.overlaps(npcLua) && Gdx.input.isKeyJustPressed(Input.Keys.E)) {
@@ -315,21 +298,23 @@ public class GameScreen implements Screen {
         for (int i = caixasCrafting.size - 1; i >= 0; i--) {
             ItemDrop caixa = caixasCrafting.get(i);
             if (player.overlaps(caixa.rect)) {
-                caixasColetadas++;
-                caixasCrafting.removeIndex(i);
+                caixasColetadas++; caixasCrafting.removeIndex(i);
                 SoundManager.playSound("pickup");
-                mensagemAviso = "PEÇA COLETADA (" + caixasColetadas + "/" + CAIXAS_NECESSARIAS + ")";
-                avisoTimer = 2.0f;
+                mensagemAviso = "PEÇA COLETADA (" + caixasColetadas + "/" + CAIXAS_NECESSARIAS + ")"; avisoTimer = 2.0f;
             }
         }
 
         if (Gdx.input.isKeyJustPressed(Input.Keys.R) && armaCraftada && !isReloading && saveData.municao < 25) {
-            isReloading = true; reloadTimer = 1.5f;
-            SoundManager.playSound("reload");
+            isReloading = true; reloadTimer = 1.5f; SoundManager.playSound("reload");
         }
         if (isReloading) {
             reloadTimer -= delta;
             if (reloadTimer <= 0) { isReloading = false; saveData.municao = 25; mensagemAviso = "MUNICÃO RECARREGADA!"; avisoTimer = 2f; }
+        }
+
+        if (estadoJogador == 2) {
+            slashAnimTimer -= delta;
+            if (slashAnimTimer <= 0) estadoJogador = 0;
         }
 
         boolean moving = false;
@@ -337,7 +322,21 @@ public class GameScreen implements Screen {
         if (Gdx.input.isKeyPressed(Input.Keys.D)) { player.x += 300 * delta; moving = true; }
         if (Gdx.input.isKeyPressed(Input.Keys.W)) { player.y += 300 * delta; moving = true; }
         if (Gdx.input.isKeyPressed(Input.Keys.S)) { player.y -= 300 * delta; moving = true; }
-        if (moving) stateTime += delta;
+        stateTime += delta;
+
+        if (estadoJogador != 2) {
+            if (moving) {
+                estadoJogador = 1;
+                timerPasso -= delta;
+                if (timerPasso <= 0) {
+                    SoundManager.playSound(MathUtils.randomBoolean() ? "footstep1" : "footstep2");
+                    timerPasso = 0.35f;
+                }
+            } else {
+                estadoJogador = 0;
+                timerPasso = 0f;
+            }
+        }
 
         player.x = MathUtils.clamp(player.x, 0, WORLD_WIDTH - player.width);
         player.y = MathUtils.clamp(player.y, 0, WORLD_HEIGHT - player.height);
@@ -367,6 +366,9 @@ public class GameScreen implements Screen {
         }
 
         if (armaCraftada && Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && saveData.municao > 0 && cooldown <= 0f && !isReloading) {
+            estadoJogador = 2;
+            slashAnimTimer = 0.3f;
+            stateTime = 0f;
             saveData.municao--; cooldown = 0.25f;
             SoundManager.playSound("slash");
             Vector3 m = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
@@ -379,23 +381,22 @@ public class GameScreen implements Screen {
             for (Enemy e : enemies) {
                 if (e.ativo && s.rect.overlaps(e.rect)) {
                     e.hp -= 40; s.active = false;
+                    if (somEnemyTimer <= 0) {
+                        SoundManager.playSound("enemy");
+                        somEnemyTimer = 25f; // Limite de spam de som de dano/rugido
+                    }
                     if (e.hp <= 0) e.ativo = false;
                     break;
                 }
             }
         }
 
-        // Troca de tela com Fade Out
         if (Gdx.input.isKeyJustPressed(Input.Keys.E) && player.overlaps(portalParaMarte)) {
             if (armaCraftada) {
-                SoundManager.playSound("portal");
-                saveData.fase = "MARTE";
-                saveData.salvar();
-                fadingOut = true;
-                nextScreen = new MarsScreen(game, saveData);
+                saveData.fase = "MARTE"; saveData.salvar();
+                fadingOut = true; nextScreen = new MarsScreen(game, saveData);
             } else {
-                mensagemAviso = "VOCÊ PRECISA CRAFTAR A SLASHWAVE PARA ATIVAR O PORTAL!";
-                avisoTimer = 2f;
+                mensagemAviso = "VOCÊ PRECISA CRAFTAR A SLASHWAVE PARA ATIVAR O PORTAL!"; avisoTimer = 2f;
             }
         }
     }

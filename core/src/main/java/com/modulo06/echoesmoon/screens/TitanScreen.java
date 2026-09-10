@@ -38,19 +38,24 @@ public class TitanScreen implements Screen {
     private Array<SlashWave> slashesJogador;
     private Array<SlashWave> pedrasBoss;
     private Array<SlashWave> tirosMinions;
-    private Array<ItemDrop> dropsO2; // << Array de drops de O2
+    private Array<ItemDrop> dropsO2;
     private DialogSystem dialog;
 
-    private Texture fundoTex, playerSheet, slashTex, bossTex, rochaTex, portraitBoss, alienTex, o2Tex;
-    private Animation<TextureRegion> playerAnim;
+    private Texture fundoTex, slashTex, bossTex, rochaTex, portraitBoss, alienTex, o2Tex;
+
+    // Variáveis de Animação e Estado
+    private Animation<TextureRegion> animIdle, animWalk, animSlash;
+    private int estadoJogador = 0;
+    private float slashAnimTimer = 0f;
+    private float timerPasso = 0f;
     private float stateTime = 0f;
+    private float somEnemyTimer = 0f; // Timer antispam para hordas
 
     private int bossState = 0;
     private float bossTimer = 0f, hordeTimer = 0f, cooldown = 0f, reloadTimer = 0f, avisoTimer = 0f;
     private String mensagemAviso = "";
     private boolean isReloading = false;
 
-    // Transição de Fade Overlay
     private float fadeAlpha = 1.0f;
     private boolean fadingOut = false;
     private Screen nextScreen = null;
@@ -67,7 +72,6 @@ public class TitanScreen implements Screen {
 
         player = new Rectangle(100, 100, 32, 48);
 
-        // Boss Buffado: HP 4000
         boss = new Enemy(800, 800, 0);
         boss.rect.width = 110;
         boss.rect.height = 110;
@@ -81,18 +85,17 @@ public class TitanScreen implements Screen {
         dropsO2 = new Array<>();
 
         carregarTexturas();
-        SoundManager.playMusic("boss_theme", true);
+        SoundManager.playMusic("boss", true);
+        SoundManager.playSound("bossgrowl");
 
         dialog.start(new String[]{
-            "HUMANO INSENSATO... COMO OUSA INVADIR MEU PLANETA?",
-            "VOCÊ SERÁ PETRIFICADO COM AS MINHAS ROCHAS E LACRAIOS!",
-            "TENTE VIR PRA CIMA DE MIM, VERME!"
+            "HUMANO INSENSATO... VOCE OUSOU INVASIR O MEU DOMINIO!",
+            "EU SOU A BESTA DE TITA! SEU OXIGENIO SERA O SEU FIM!"
         }, portraitBoss != null ? portraitBoss : bossTex);
     }
 
     private void carregarTexturas() {
         fundoTex = safeLoad("fundo_tita.png");
-        playerSheet = safeLoad("player_marte.png");
         bossTex = safeLoad("boss_tita.png");
         alienTex = safeLoad("alien_lunar.png");
         slashTex = safeLoad("slash_wave.png");
@@ -100,12 +103,13 @@ public class TitanScreen implements Screen {
         portraitBoss = safeLoad("portrait_boss.png");
         o2Tex = safeLoad("o2.png");
 
-        if (playerSheet != null) {
-            TextureRegion[][] tmp = TextureRegion.split(playerSheet, playerSheet.getWidth() / 4, playerSheet.getHeight());
-            TextureRegion[] walkFrames = new TextureRegion[4];
-            for (int j = 0; j < 4; j++) walkFrames[j] = tmp[0][j];
-            playerAnim = new Animation<>(0.15f, walkFrames);
-        }
+        Texture idleTex = safeLoad("player_lunar.png");
+        Texture walkTex = safeLoad("player_lunar_walk.png");
+        Texture slashTexAnim = safeLoad("player_lunar_slash.png");
+
+        if (idleTex != null) animIdle = new Animation<>(0.2f, TextureRegion.split(idleTex, idleTex.getWidth() / 4, idleTex.getHeight())[0]);
+        if (walkTex != null) animWalk = new Animation<>(0.12f, TextureRegion.split(walkTex, walkTex.getWidth() / 4, walkTex.getHeight())[0]);
+        if (slashTexAnim != null) animSlash = new Animation<>(0.1f, TextureRegion.split(slashTexAnim, slashTexAnim.getWidth() / 4, slashTexAnim.getHeight())[0]);
     }
 
     private Texture safeLoad(String path) {
@@ -124,46 +128,31 @@ public class TitanScreen implements Screen {
         batch.begin();
         if (fundoTex != null) batch.draw(fundoTex, 0, 0, 1200, 1200);
 
-        // Renderiza itens de O2 no chão
-        for (ItemDrop d : dropsO2) {
-            if (o2Tex != null) batch.draw(o2Tex, d.rect.x, d.rect.y, d.rect.width, d.rect.height);
-        }
-
-        // Renderiza Inimigos da Horda
-        for (Enemy m : minions) {
-            if (m.ativo && alienTex != null) batch.draw(alienTex, m.rect.x, m.rect.y, m.rect.width, m.rect.height);
-        }
-
+        for (ItemDrop d : dropsO2) if (o2Tex != null) batch.draw(o2Tex, d.rect.x, d.rect.y, d.rect.width, d.rect.height);
+        for (Enemy m : minions) if (m.ativo && alienTex != null) batch.draw(alienTex, m.rect.x, m.rect.y, m.rect.width, m.rect.height);
         if (boss.ativo && bossTex != null) batch.draw(bossTex, boss.rect.x, boss.rect.y, boss.rect.width, boss.rect.height);
 
         for (SlashWave s : slashesJogador) if (s.active && slashTex != null) batch.draw(slashTex, s.rect.x, s.rect.y, 24, 24, 48, 48, 1f, 1f, s.angle, 0, 0, slashTex.getWidth(), slashTex.getHeight(), false, false);
         for (SlashWave p : pedrasBoss) if (p.active && rochaTex != null) batch.draw(rochaTex, p.rect.x, p.rect.y, 32, 32, 64, 64, 1.5f, 1.5f, p.angle, 0, 0, rochaTex.getWidth(), rochaTex.getHeight(), false, false);
         for (SlashWave t : tirosMinions) if (t.active && slashTex != null) batch.draw(slashTex, t.rect.x, t.rect.y, 16, 16, 32, 32, 0.8f, 0.8f, t.angle, 0, 0, slashTex.getWidth(), slashTex.getHeight(), false, false);
 
-        if (playerAnim != null) batch.draw(playerAnim.getKeyFrame(stateTime, true), player.x, player.y, player.width, player.height);
-        else if (playerSheet != null) batch.draw(playerSheet, player.x, player.y, player.width, player.height);
+        TextureRegion frameAtual = null;
+        if (estadoJogador == 2 && animSlash != null) frameAtual = animSlash.getKeyFrame(stateTime, false);
+        else if (estadoJogador == 1 && animWalk != null) frameAtual = animWalk.getKeyFrame(stateTime, true);
+        else if (animIdle != null) frameAtual = animIdle.getKeyFrame(stateTime, true);
 
+        if (frameAtual != null) batch.draw(frameAtual, player.x, player.y, player.width, player.height);
         batch.end();
 
         shapeRenderer.setProjectionMatrix(camera.combined);
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
-
-        // Vida dos Minions
         for (Enemy m : minions) {
             if (m.ativo) {
                 shapeRenderer.setColor(0.8f, 0f, 0f, 1);
-                shapeRenderer.rect(m.rect.x, m.rect.y + m.rect.height + 3, m.rect.width, 4);
+                shapeRenderer.rect(m.rect.x, m.rect.y + m.rect.height + 5, m.rect.width, 5);
                 shapeRenderer.setColor(0f, 0.8f, 0f, 1);
-                shapeRenderer.rect(m.rect.x, m.rect.y + m.rect.height + 3, m.rect.width * Math.max(0, m.hp / (float)m.maxHp), 4);
+                shapeRenderer.rect(m.rect.x, m.rect.y + m.rect.height + 5, m.rect.width * Math.max(0, m.hp / (float)m.maxHp), 5);
             }
-        }
-
-        // Barra de Vida Gigante do Boss
-        if (boss.ativo) {
-            shapeRenderer.setColor(0.5f, 0f, 0f, 1f);
-            shapeRenderer.rect(boss.rect.x, boss.rect.y + boss.rect.height + 8, boss.rect.width, 12);
-            shapeRenderer.setColor(1f, 0.1f, 0.1f, 1f);
-            shapeRenderer.rect(boss.rect.x, boss.rect.y + boss.rect.height + 8, boss.rect.width * Math.max(0, boss.hp / (float)boss.maxHp), 12);
         }
         shapeRenderer.end();
 
@@ -174,6 +163,7 @@ public class TitanScreen implements Screen {
     private void update(float delta) {
         if (fadingOut) return;
 
+        if (somEnemyTimer > 0f) somEnemyTimer -= delta;
         if (cooldown > 0f) cooldown -= delta;
         if (avisoTimer > 0f) avisoTimer -= delta;
         saveData.o2 -= 0.8f * delta;
@@ -184,19 +174,40 @@ public class TitanScreen implements Screen {
             return;
         }
 
-        // Checkpoint por F5
-        if (Gdx.input.isKeyJustPressed(Input.Keys.F5)) {
-            saveData.fase = "TITA";
-            saveData.salvar();
-            mensagemAviso = "CHECKPOINT SALVO EM TITA!";
-            avisoTimer = 2.0f;
+        if (estadoJogador == 2) {
+            slashAnimTimer -= delta;
+            if (slashAnimTimer <= 0) estadoJogador = 0;
         }
 
-        // Coleta de O2 do chão
+        boolean moving = false;
+        if (Gdx.input.isKeyPressed(Input.Keys.A)) { player.x -= 300 * delta; moving = true; }
+        if (Gdx.input.isKeyPressed(Input.Keys.D)) { player.x += 300 * delta; moving = true; }
+        if (Gdx.input.isKeyPressed(Input.Keys.W)) { player.y += 300 * delta; moving = true; }
+        if (Gdx.input.isKeyPressed(Input.Keys.S)) { player.y -= 300 * delta; moving = true; }
+        stateTime += delta;
+
+        if (estadoJogador != 2) {
+            if (moving) {
+                estadoJogador = 1;
+                timerPasso -= delta;
+                if (timerPasso <= 0) {
+                    SoundManager.playSound(MathUtils.randomBoolean() ? "footstep1" : "footstep2");
+                    timerPasso = 0.35f;
+                }
+            } else {
+                estadoJogador = 0;
+                timerPasso = 0f;
+            }
+        }
+
+        player.x = MathUtils.clamp(player.x, 0, 1200 - player.width);
+        player.y = MathUtils.clamp(player.y, 0, 1200 - player.height);
+        camera.position.set(player.x, player.y, 0);
+
         for (int i = dropsO2.size - 1; i >= 0; i--) {
             ItemDrop d = dropsO2.get(i);
             if (player.overlaps(d.rect)) {
-                saveData.o2 = Math.min(100, saveData.o2 + 20); // << VALOR DO O2 CONFIGURADO AQUI
+                saveData.o2 = Math.min(100, saveData.o2 + 20);
                 SoundManager.playSound("pickup");
                 mensagemAviso = "+20 O2 COLETADO!";
                 avisoTimer = 1.5f;
@@ -213,32 +224,34 @@ public class TitanScreen implements Screen {
             if (reloadTimer <= 0) { isReloading = false; saveData.municao = 25; mensagemAviso = "MUNICÃO RECARREGADA!"; avisoTimer = 2f; }
         }
 
-        boolean moving = false;
-        if (Gdx.input.isKeyPressed(Input.Keys.A)) { player.x -= 300 * delta; moving = true; }
-        if (Gdx.input.isKeyPressed(Input.Keys.D)) { player.x += 300 * delta; moving = true; }
-        if (Gdx.input.isKeyPressed(Input.Keys.W)) { player.y += 300 * delta; moving = true; }
-        if (Gdx.input.isKeyPressed(Input.Keys.S)) { player.y -= 300 * delta; moving = true; }
-        if (moving) stateTime += delta;
+        for (int i = minions.size - 1; i >= 0; i--) {
+            Enemy m = minions.get(i);
+            if (m.ativo) {
+                m.update(delta, new Vector2(player.x, player.y));
+                if (m.cooldownTiro <= 0 && new Vector2(player.x - m.rect.x, player.y - m.rect.y).len() < 500f) {
+                    tirosMinions.add(new SlashWave(m.rect.x, m.rect.y, player.x, player.y));
+                    m.cooldownTiro = 2.5f;
+                }
+                if (m.rect.overlaps(player)) saveData.o2 -= 10f * delta;
+            } else {
+                minions.removeIndex(i);
+            }
+        }
 
-        player.x = MathUtils.clamp(player.x, 0, 1200 - player.width);
-        player.y = MathUtils.clamp(player.y, 0, 1200 - player.height);
-        camera.position.set(player.x, player.y, 0);
-
-        // Lógica do Boss
         if (boss.ativo) {
             bossTimer += delta;
             hordeTimer += delta;
 
-            // Invocação de Horda (A cada 9 segundos)
             if (hordeTimer >= 9f) {
                 hordeTimer = 0f;
                 mensagemAviso = "O CHEFE CONVOCOU UMA HORDA!";
                 avisoTimer = 2.5f;
-
-                minions.add(new Enemy(boss.rect.x + 60, boss.rect.y, 0));
-                minions.add(new Enemy(boss.rect.x - 60, boss.rect.y, 0));
-                minions.add(new Enemy(boss.rect.x, boss.rect.y + 60, 1));
-                minions.add(new Enemy(boss.rect.x, boss.rect.y - 60, 1));
+                minions.add(new Enemy(boss.rect.x + 60, boss.rect.y, 1));
+                minions.add(new Enemy(boss.rect.x - 60, boss.rect.y, 1));
+                if (somEnemyTimer <= 0) {
+                    SoundManager.playSound("enemy");
+                    somEnemyTimer = 25f;
+                }
             }
 
             if (bossState == 0) {
@@ -257,68 +270,66 @@ public class TitanScreen implements Screen {
             if (boss.rect.overlaps(player)) saveData.o2 -= 20f * delta;
         }
 
-        // Atualização dos Minions
-        for (int i = minions.size - 1; i >= 0; i--) {
-            Enemy m = minions.get(i);
-            if (m.ativo) {
-                m.update(delta, new Vector2(player.x, player.y));
-                if (m.type == 1 && m.cooldownTiro <= 0) {
-                    tirosMinions.add(new SlashWave(m.rect.x, m.rect.y, player.x, player.y));
-                    m.cooldownTiro = 3.0f;
-                }
-                if (m.rect.overlaps(player)) saveData.o2 -= 6f * delta;
-            } else minions.removeIndex(i);
-        }
-
-        // Projéteis dos minions
-        for (int i = tirosMinions.size - 1; i >= 0; i--) {
-            SlashWave t = tirosMinions.get(i); t.update(delta);
-            if (t.rect.overlaps(player)) { saveData.o2 -= 8f; t.active = false; }
-            if (!t.active) tirosMinions.removeIndex(i);
-        }
-
-        for (int i = pedrasBoss.size - 1; i >= 0; i--) {
-            SlashWave p = pedrasBoss.get(i); p.update(delta * 0.8f);
-            if (p.rect.overlaps(player)) { saveData.o2 -= 25f; p.active = false; }
-            if (!p.active) pedrasBoss.removeIndex(i);
-        }
-
         if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && saveData.municao > 0 && cooldown <= 0f && !isReloading) {
+            estadoJogador = 2;
+            slashAnimTimer = 0.3f;
+            stateTime = 0f;
             saveData.municao--; cooldown = 0.25f;
             SoundManager.playSound("slash");
+
             Vector3 m = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
-            camera.unproject(m); slashesJogador.add(new SlashWave(player.x, player.y, m.x, m.y));
+            camera.unproject(m);
+            slashesJogador.add(new SlashWave(player.x, player.y, m.x, m.y));
         }
 
         for (int i = slashesJogador.size - 1; i >= 0; i--) {
             SlashWave s = slashesJogador.get(i); s.update(delta);
             if (!s.active) { slashesJogador.removeIndex(i); continue; }
 
-            // Dano no Boss
             if (boss.ativo && s.rect.overlaps(boss.rect)) {
                 boss.hp -= 25; s.active = false;
+                SoundManager.playSound("hit_enemy");
                 if (boss.hp <= 0) {
-                    boss.ativo = false;
-                    fadingOut = true;
-                    nextScreen = new VictoryScreen(game, saveData);
+                    boss.ativo = false; fadingOut = true; nextScreen = new VictoryScreen(game, saveData);
                 }
                 continue;
             }
 
-            // Dano nos Minions e DROP DE O2
+            // Dano na Horda com o Drop de O2 adicionado
             for (Enemy m : minions) {
                 if (m.ativo && s.rect.overlaps(m.rect)) {
                     m.hp -= 40; s.active = false;
+                    SoundManager.playSound("hit_enemy");
+
                     if (m.hp <= 0) {
                         m.ativo = false;
-                        // 60% de chance do minion dropar O2 ao morrer
-                        if (MathUtils.randomBoolean(0.6f)) {
+                        if (MathUtils.randomBoolean(0.5f)) {
                             dropsO2.add(new ItemDrop(m.rect.x, m.rect.y, 0));
                         }
                     }
                     break;
                 }
             }
+        }
+
+        for (int i = pedrasBoss.size - 1; i >= 0; i--) {
+            SlashWave p = pedrasBoss.get(i);
+            p.update(delta);
+            if (p.rect.overlaps(player)) {
+                saveData.o2 -= 15f;
+                p.active = false;
+            }
+            if (!p.active) pedrasBoss.removeIndex(i);
+        }
+
+        for (int i = tirosMinions.size - 1; i >= 0; i--) {
+            SlashWave t = tirosMinions.get(i);
+            t.update(delta);
+            if (t.rect.overlaps(player)) {
+                saveData.o2 -= 10f;
+                t.active = false;
+            }
+            if (!t.active) tirosMinions.removeIndex(i);
         }
     }
 
@@ -331,6 +342,12 @@ public class TitanScreen implements Screen {
         shapeRenderer.rect(20, 20, 250, 100);
         shapeRenderer.setColor(0.1f, 0.5f, 0.8f, 1f);
         shapeRenderer.rect(30, 30, 230 * (Math.max(0, saveData.o2) / 100f), 15);
+
+        if (boss.ativo) {
+            shapeRenderer.setColor(0.2f, 0.2f, 0.2f, 1f); shapeRenderer.rect(440, 680, 400, 20);
+            shapeRenderer.setColor(0.8f, 0.1f, 0.1f, 1f);
+            shapeRenderer.rect(440, 680, 400 * (boss.hp / (float)boss.maxHp), 20);
+        }
         shapeRenderer.end();
 
         batch.begin();
@@ -339,7 +356,7 @@ public class TitanScreen implements Screen {
         font.draw(batch, "MUNICÃO: " + saveData.municao, 30, 95);
         font.draw(batch, "PLANETA: TITA", 30, 115);
 
-        font.draw(batch, "[TAB] Ocultar Objetivos | [F5] Salvar Checkpoint | [R] Recarregar", 20, 715);
+        if (boss.ativo) font.draw(batch, "BESTA DE TITA", 600, 695);
 
         if (isReloading) font.draw(batch, "RECARREGANDO...", 130, 95);
         if (avisoTimer > 0) font.draw(batch, mensagemAviso, 550, 100);
@@ -368,5 +385,11 @@ public class TitanScreen implements Screen {
     }
 
     @Override public void show() {} @Override public void resize(int w, int h) {}
-    @Override public void pause() {} @Override public void resume() {} @Override public void hide() {} @Override public void dispose() {}
+    @Override public void pause() {} @Override public void resume() {}
+
+    @Override
+    public void hide() { SoundManager.stopMusic(); }
+
+    @Override
+    public void dispose() { batch.dispose(); shapeRenderer.dispose(); font.dispose(); }
 }
