@@ -17,11 +17,15 @@ import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Array;
 import com.modulo06.echoesmoon.entities.Enemy;
+import com.modulo06.echoesmoon.entities.FoodDrop;
+import com.modulo06.echoesmoon.entities.WorldRock;
 import com.modulo06.echoesmoon.entities.ItemDrop;
 import com.modulo06.echoesmoon.entities.SlashWave;
 import com.modulo06.echoesmoon.systems.DialogSystem;
 import com.modulo06.echoesmoon.systems.GameSaveData;
 import com.modulo06.echoesmoon.systems.SoundManager;
+import com.modulo06.echoesmoon.systems.UpgradeSystem;
+import com.modulo06.echoesmoon.systems.WorldCollision;
 
 public class GameScreen implements Screen {
     private Game game;
@@ -31,20 +35,21 @@ public class GameScreen implements Screen {
     private ShapeRenderer shapeRenderer;
     private BitmapFont font;
 
-    private Texture fundoLuaTex, portalTex, slashTex, bancadaTex, alienTex, portraitOficial, npcTex, baseTex, caixaTex;
+    private Texture fundoLuaTex, portalTex, slashTex, bancadaTex, alienTex, portraitOficial, npcTex, baseTex, caixaTex, foodTex, rockTex;
 
-    // Variáveis de Animação e Estado
     private Animation<TextureRegion> animIdle, animWalk, animSlash;
-    private int estadoJogador = 0; // 0=IDLE, 1=WALK, 2=SLASH
+    private int estadoJogador = 0;
     private float slashAnimTimer = 0f;
     private float timerPasso = 0f;
     private float stateTime = 0f;
-    private float somEnemyTimer = 0f; // Timer para limitar spam do enemy.wav
+    private float somEnemyTimer = 0f;
 
     private Rectangle player, portalParaMarte, bancada, zonaInteracao, npcLua, safeZone;
     private Array<SlashWave> slashes;
     private Array<Enemy> enemies;
     private Array<ItemDrop> caixasCrafting;
+    private Array<FoodDrop> comidas;
+    private Array<WorldRock> pedras;
     private DialogSystem dialog;
 
     private final float WORLD_WIDTH = 1200f;
@@ -84,12 +89,17 @@ public class GameScreen implements Screen {
         npcLua = new Rectangle(250, 350, 36, 54);
         safeZone = new Rectangle(180, 280, 160, 160);
 
-        this.saveData.municao = 0;
+        this.saveData.sincronizarInventario();
+        this.armaCraftada = this.saveData.inventario.temArma;
+        this.falouOficial = this.saveData.luaMissoesOk;
         slashes = new Array<>();
         enemies = new Array<>();
         caixasCrafting = new Array<>();
+        comidas = new Array<>();
+        pedras = new Array<>();
 
         carregarTexturas();
+        spawnAmbientObjects();
         SoundManager.playMusic("lua", true);
     }
 
@@ -103,20 +113,38 @@ public class GameScreen implements Screen {
         npcTex = safeLoad("npc.png");
         baseTex = safeLoad("base.png");
         caixaTex = safeLoad("item.png");
+        foodTex = safeLoad("food.png");
+        rockTex = safeLoad("pedra.png");
 
         Texture idleTex = safeLoad("player_lunar.png");
         Texture walkTex = safeLoad("player_lunar_walk.png");
-        Texture slashTexAnim = safeLoad("player_lunar_slash.png"); // Imagem agora processada corretamente em 4 frames
+        Texture slashTexAnim = safeLoad("player_lunar_slash.png");
 
         if (idleTex != null) animIdle = new Animation<>(0.2f, TextureRegion.split(idleTex, idleTex.getWidth() / 4, idleTex.getHeight())[0]);
         if (walkTex != null) animWalk = new Animation<>(0.12f, TextureRegion.split(walkTex, walkTex.getWidth() / 4, walkTex.getHeight())[0]);
-        // Correção: Dividido por 4 frames conforme o sprite sheet
         if (slashTexAnim != null) animSlash = new Animation<>(0.1f, TextureRegion.split(slashTexAnim, slashTexAnim.getWidth() / 4, slashTexAnim.getHeight())[0]);
     }
 
     private Texture safeLoad(String path) {
         try { if (Gdx.files.internal(path).exists()) return new Texture(path); } catch (Exception ignored) {}
         return null;
+    }
+
+
+    private void spawnAmbientObjects() {
+        Array<Rectangle> forbidden = new Array<>();
+        forbidden.add(safeZone);
+        forbidden.add(bancada);
+        forbidden.add(npcLua);
+        forbidden.add(portalParaMarte);
+        WorldRock.spawnMany(pedras, 28, WORLD_WIDTH, WORLD_HEIGHT, player, forbidden, 180f);
+        for (int i = 0; i < 10; i++) {
+            float x = MathUtils.random(80f, WORLD_WIDTH - 80f);
+            float y = MathUtils.random(80f, WORLD_HEIGHT - 80f);
+            Rectangle r = new Rectangle(x, y, 28, 28);
+            if (r.overlaps(player) || r.overlaps(safeZone) || r.overlaps(bancada) || r.overlaps(npcLua) || r.overlaps(portalParaMarte)) continue;
+            comidas.add(new FoodDrop(x, y));
+        }
     }
 
     private void gerarCaixasEInimigos() {
@@ -149,6 +177,14 @@ public class GameScreen implements Screen {
         if (bancadaTex != null) batch.draw(bancadaTex, bancada.x, bancada.y, bancada.width, bancada.height);
         if (npcTex != null) batch.draw(npcTex, npcLua.x, npcLua.y, npcLua.width, npcLua.height);
 
+        for (WorldRock rock : pedras) {
+            if (rockTex != null) {
+                batch.setColor(0.62f, 0.68f, 0.74f, 1f);
+                batch.draw(rockTex, rock.rect.x, rock.rect.y, rock.rect.width, rock.rect.height);
+                batch.setColor(1f, 1f, 1f, 1f);
+            }
+        }
+        for (FoodDrop food : comidas) if (foodTex != null) batch.draw(foodTex, food.rect.x, food.rect.y, food.rect.width, food.rect.height);
         for (ItemDrop caixa : caixasCrafting) if (caixaTex != null) batch.draw(caixaTex, caixa.rect.x, caixa.rect.y, caixa.rect.width, caixa.rect.height);
         for (Enemy e : enemies) if (e.ativo && alienTex != null) batch.draw(alienTex, e.rect.x, e.rect.y, e.rect.width, e.rect.height);
         for (SlashWave s : slashes) if (s.active && slashTex != null) batch.draw(slashTex, s.rect.x, s.rect.y, 24, 24, 48, 48, 1f, 1f, s.angle, 0, 0, slashTex.getWidth(), slashTex.getHeight(), false, false);
@@ -166,7 +202,7 @@ public class GameScreen implements Screen {
             else font.draw(batch, "[E] RECARREGAR MUNIÇÃO", bancada.x - 20, bancada.y - 10);
         }
 
-        if (player.overlaps(portalParaMarte)) font.draw(batch, armaCraftada ? "[E] IR PARA MARTE" : "PORTAL BLOQUEADO (REQUER SLASHWAVE)", portalParaMarte.x - 20, portalParaMarte.y - 20);
+        if (player.overlaps(portalParaMarte)) font.draw(batch, armaCraftada ? "[E] IR PARA A CRATERA" : "PORTAL BLOQUEADO (REQUER SLASHWAVE)", portalParaMarte.x - 20, portalParaMarte.y - 20);
 
         batch.end();
 
@@ -191,6 +227,11 @@ public class GameScreen implements Screen {
 
         desenharHUD();
         desenharFade(delta);
+
+        // --- SISTEMA DE INVENTARIO: RENDERIZA POR CIMA DE TUDO ---
+        if (saveData.inventario != null && saveData.inventario.aberto) {
+            saveData.inventario.render(batch, font, batch.getProjectionMatrix(), saveData);
+        }
     }
 
     private void desenharHUD() {
@@ -226,10 +267,10 @@ public class GameScreen implements Screen {
             if (!falouOficial) font.draw(batch, "- Fale com o Oficial na base.", 40, 650);
             else if (caixasColetadas < CAIXAS_NECESSARIAS) font.draw(batch, "- Colete peças pelo mapa (" + caixasColetadas + "/" + CAIXAS_NECESSARIAS + ")", 40, 650);
             else if (!armaCraftada) font.draw(batch, "- Vá para a bancada e fabrique a arma.", 40, 650);
-            else font.draw(batch, "- Entre no portal para prosseguir ate Marte.", 40, 650);
+            else font.draw(batch, "- Entre no portal da cratera para enfrentar o Guardiao da Lua.", 40, 650);
         }
 
-        font.draw(batch, "[TAB] Ocultar Objetivos | [F5] Salvar Checkpoint | [R] Recarregar", 20, 715);
+        font.draw(batch, "[TAB] Ocultar Quest | [I] Inventario | [F5] Salvar Checkpoint | [R] Recarregar", 20, 715);
         if (avisoTimer > 0) font.draw(batch, mensagemAviso, 550, 100);
         batch.end();
 
@@ -257,6 +298,19 @@ public class GameScreen implements Screen {
 
     private void update(float delta) {
         if (fadingOut) return;
+
+        // --- CONTROLE DO INVENTÁRIO & PAUSA ---
+        if (saveData.inventario != null) {
+            if (Gdx.input.isKeyJustPressed(Input.Keys.I)) {
+                saveData.inventario.aberto = !saveData.inventario.aberto;
+            }
+            if (saveData.inventario.aberto) {
+                if (Gdx.input.isKeyJustPressed(Input.Keys.C)) {
+                    saveData.inventario.usarComida(saveData);
+                }
+                return; // PAUSA O JOGO AQUI
+            }
+        }
 
         if (somEnemyTimer > 0f) somEnemyTimer -= delta;
         if (cooldown > 0f) cooldown -= delta;
@@ -304,6 +358,17 @@ public class GameScreen implements Screen {
             }
         }
 
+        for (int i = comidas.size - 1; i >= 0; i--) {
+            FoodDrop food = comidas.get(i);
+            if (player.overlaps(food.rect)) {
+                saveData.inventario.add("COMIDA");
+                comidas.removeIndex(i);
+                mensagemAviso = "+1 COMIDA! Aperte I e depois C para usar.";
+                avisoTimer = 2f;
+                SoundManager.playSound("pickup");
+            }
+        }
+
         if (Gdx.input.isKeyJustPressed(Input.Keys.R) && armaCraftada && !isReloading && saveData.municao < 25) {
             isReloading = true; reloadTimer = 1.5f; SoundManager.playSound("reload");
         }
@@ -318,10 +383,12 @@ public class GameScreen implements Screen {
         }
 
         boolean moving = false;
-        if (Gdx.input.isKeyPressed(Input.Keys.A)) { player.x -= 300 * delta; moving = true; }
-        if (Gdx.input.isKeyPressed(Input.Keys.D)) { player.x += 300 * delta; moving = true; }
-        if (Gdx.input.isKeyPressed(Input.Keys.W)) { player.y += 300 * delta; moving = true; }
-        if (Gdx.input.isKeyPressed(Input.Keys.S)) { player.y -= 300 * delta; moving = true; }
+        float dx = 0f, dy = 0f;
+        if (Gdx.input.isKeyPressed(Input.Keys.A)) { dx -= 300 * delta; moving = true; }
+        if (Gdx.input.isKeyPressed(Input.Keys.D)) { dx += 300 * delta; moving = true; }
+        if (Gdx.input.isKeyPressed(Input.Keys.W)) { dy += 300 * delta; moving = true; }
+        if (Gdx.input.isKeyPressed(Input.Keys.S)) { dy -= 300 * delta; moving = true; }
+        WorldCollision.movePlayer(player, dx, dy, pedras, WORLD_WIDTH, WORLD_HEIGHT);
         stateTime += delta;
 
         if (estadoJogador != 2) {
@@ -347,7 +414,7 @@ public class GameScreen implements Screen {
                 if (caixasColetadas >= CAIXAS_NECESSARIAS) {
                     craftingProgress += delta;
                     if (craftingProgress >= 1.5f) {
-                        if (!armaCraftada) { armaCraftada = true; saveData.municao = 25; mensagemAviso = "SLASHWAVE FABRICADA! PORTAL LIBERADO!"; }
+                        if (!armaCraftada) { armaCraftada = true; saveData.inventario.temArma = true; saveData.temArma = true; saveData.inventario.municao = 25; saveData.municao = 25; saveData.luaMissoesOk = true; mensagemAviso = "SLASHWAVE FABRICADA! PORTAL DA CRATERA LIBERADO!"; saveData.salvar(); }
                         else { saveData.municao = 25; mensagemAviso = "MUNICÃO MAXIMA!"; }
                         craftingProgress = 0f; avisoTimer = 2.5f;
                     }
@@ -361,15 +428,15 @@ public class GameScreen implements Screen {
         for (Enemy e : enemies) {
             if (e.ativo) {
                 e.update(delta, new com.badlogic.gdx.math.Vector2(player.x, player.y));
-                if (e.rect.overlaps(player)) saveData.o2 -= 5f * delta;
+                if (e.rect.overlaps(player)) UpgradeSystem.aplicarDano(saveData, 5f * delta);
             }
         }
 
-        if (armaCraftada && Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && saveData.municao > 0 && cooldown <= 0f && !isReloading) {
+        if (armaCraftada && (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) || Gdx.input.isKeyJustPressed(Input.Keys.SPACE)) && saveData.municao > 0 && cooldown <= 0f && !isReloading) {
             estadoJogador = 2;
             slashAnimTimer = 0.3f;
             stateTime = 0f;
-            saveData.municao--; cooldown = 0.25f;
+            saveData.municao--; saveData.inventario.municao = saveData.municao; cooldown = Math.max(0.14f, 0.25f - 0.02f * saveData.inventario.nivelArma);
             SoundManager.playSound("slash");
             Vector3 m = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
             camera.unproject(m); slashes.add(new SlashWave(player.x, player.y, m.x, m.y));
@@ -380,23 +447,30 @@ public class GameScreen implements Screen {
             if (!s.active) { slashes.removeIndex(i); continue; }
             for (Enemy e : enemies) {
                 if (e.ativo && s.rect.overlaps(e.rect)) {
-                    e.hp -= 40; s.active = false;
+                    e.hp -= UpgradeSystem.danoArma(saveData); s.active = false;
                     if (somEnemyTimer <= 0) {
                         SoundManager.playSound("enemy");
-                        somEnemyTimer = 25f; // Limite de spam de som de dano/rugido
+                        somEnemyTimer = 25f;
                     }
-                    if (e.hp <= 0) e.ativo = false;
+                    if (e.hp <= 0) {
+                        e.ativo = false;
+                        if (UpgradeSystem.registerKill(saveData)) {
+                            mensagemAviso = saveData.ultimoUpgrade;
+                            avisoTimer = 2.5f;
+                        }
+                    }
                     break;
                 }
             }
         }
 
         if (Gdx.input.isKeyJustPressed(Input.Keys.E) && player.overlaps(portalParaMarte)) {
-            if (armaCraftada) {
-                saveData.fase = "MARTE"; saveData.salvar();
-                fadingOut = true; nextScreen = new MarsScreen(game, saveData);
+            if (armaCraftada && saveData.luaMissoesOk) {
+                saveData.fase = "LUA_BOSS";
+                saveData.salvar();
+                fadingOut = true; nextScreen = new BossLuaScreen(game, saveData);
             } else {
-                mensagemAviso = "VOCÊ PRECISA CRAFTAR A SLASHWAVE PARA ATIVAR O PORTAL!"; avisoTimer = 2f;
+                mensagemAviso = "COMPLETE AS MISSOES DA LUA E FABRIQUE A ARMA!"; avisoTimer = 2f;
             }
         }
     }

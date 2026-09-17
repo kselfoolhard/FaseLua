@@ -18,11 +18,15 @@ import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Array;
 import com.modulo06.echoesmoon.entities.Enemy;
+import com.modulo06.echoesmoon.entities.FoodDrop;
+import com.modulo06.echoesmoon.entities.WorldRock;
 import com.modulo06.echoesmoon.entities.ItemDrop;
 import com.modulo06.echoesmoon.entities.SlashWave;
 import com.modulo06.echoesmoon.systems.DialogSystem;
 import com.modulo06.echoesmoon.systems.GameSaveData;
 import com.modulo06.echoesmoon.systems.SoundManager;
+import com.modulo06.echoesmoon.systems.UpgradeSystem;
+import com.modulo06.echoesmoon.systems.WorldCollision;
 
 public class TitanScreen implements Screen {
     private Game game;
@@ -39,17 +43,18 @@ public class TitanScreen implements Screen {
     private Array<SlashWave> pedrasBoss;
     private Array<SlashWave> tirosMinions;
     private Array<ItemDrop> dropsO2;
+    private Array<FoodDrop> comidas;
+    private Array<WorldRock> pedrasMapa;
     private DialogSystem dialog;
 
-    private Texture fundoTex, slashTex, bossTex, rochaTex, portraitBoss, alienTex, o2Tex;
+    private Texture fundoTex, slashTex, bossTex, rochaTex, portraitBoss, alienTex, o2Tex, foodTex, pedraMapaTex;
 
-    // Variáveis de Animação e Estado
     private Animation<TextureRegion> animIdle, animWalk, animSlash;
     private int estadoJogador = 0;
     private float slashAnimTimer = 0f;
     private float timerPasso = 0f;
     private float stateTime = 0f;
-    private float somEnemyTimer = 0f; // Timer antispam para hordas
+    private float somEnemyTimer = 0f;
 
     private int bossState = 0;
     private float bossTimer = 0f, hordeTimer = 0f, cooldown = 0f, reloadTimer = 0f, avisoTimer = 0f;
@@ -75,7 +80,7 @@ public class TitanScreen implements Screen {
         boss = new Enemy(800, 800, 0);
         boss.rect.width = 110;
         boss.rect.height = 110;
-        boss.maxHp = 4000;
+        boss.maxHp = 180;
         boss.hp = boss.maxHp;
 
         minions = new Array<>();
@@ -83,8 +88,12 @@ public class TitanScreen implements Screen {
         pedrasBoss = new Array<>();
         tirosMinions = new Array<>();
         dropsO2 = new Array<>();
+        comidas = new Array<>();
+        pedrasMapa = new Array<>();
+        saveData.sincronizarInventario();
 
         carregarTexturas();
+        spawnAmbientObjects();
         SoundManager.playMusic("boss", true);
         SoundManager.playSound("bossgrowl");
 
@@ -102,6 +111,8 @@ public class TitanScreen implements Screen {
         rochaTex = safeLoad("rocha_boss.png");
         portraitBoss = safeLoad("portrait_boss.png");
         o2Tex = safeLoad("o2.png");
+        foodTex = safeLoad("food.png");
+        pedraMapaTex = safeLoad("pedra.png");
 
         Texture idleTex = safeLoad("player_lunar.png");
         Texture walkTex = safeLoad("player_lunar_walk.png");
@@ -110,6 +121,21 @@ public class TitanScreen implements Screen {
         if (idleTex != null) animIdle = new Animation<>(0.2f, TextureRegion.split(idleTex, idleTex.getWidth() / 4, idleTex.getHeight())[0]);
         if (walkTex != null) animWalk = new Animation<>(0.12f, TextureRegion.split(walkTex, walkTex.getWidth() / 4, walkTex.getHeight())[0]);
         if (slashTexAnim != null) animSlash = new Animation<>(0.1f, TextureRegion.split(slashTexAnim, slashTexAnim.getWidth() / 4, slashTexAnim.getHeight())[0]);
+    }
+
+
+    private void spawnAmbientObjects() {
+        Array<Rectangle> forbidden = new Array<>();
+        forbidden.add(player);
+        forbidden.add(boss.rect);
+        WorldRock.spawnMany(pedrasMapa, 34, 1200f, 1200f, player, forbidden, 220f);
+        for (int i = 0; i < 12; i++) {
+            float x = MathUtils.random(70f, 1120f);
+            float y = MathUtils.random(70f, 1120f);
+            Rectangle r = new Rectangle(x, y, 28, 28);
+            if (r.overlaps(player) || r.overlaps(boss.rect)) continue;
+            comidas.add(new FoodDrop(x, y));
+        }
     }
 
     private Texture safeLoad(String path) {
@@ -128,9 +154,19 @@ public class TitanScreen implements Screen {
         batch.begin();
         if (fundoTex != null) batch.draw(fundoTex, 0, 0, 1200, 1200);
 
+        for (WorldRock rock : pedrasMapa) {
+            if (pedraMapaTex != null) {
+                batch.setColor(0.40f, 0.55f, 0.62f, 1f);
+                batch.draw(pedraMapaTex, rock.rect.x, rock.rect.y, rock.rect.width, rock.rect.height);
+                batch.setColor(1f, 1f, 1f, 1f);
+            }
+        }
+        for (FoodDrop food : comidas) if (foodTex != null) batch.draw(foodTex, food.rect.x, food.rect.y, food.rect.width, food.rect.height);
         for (ItemDrop d : dropsO2) if (o2Tex != null) batch.draw(o2Tex, d.rect.x, d.rect.y, d.rect.width, d.rect.height);
         for (Enemy m : minions) if (m.ativo && alienTex != null) batch.draw(alienTex, m.rect.x, m.rect.y, m.rect.width, m.rect.height);
-        if (boss.ativo && bossTex != null) batch.draw(bossTex, boss.rect.x, boss.rect.y, boss.rect.width, boss.rect.height);
+        if (boss.ativo) {
+            if (bossTex != null) batch.draw(bossTex, boss.rect.x, boss.rect.y, boss.rect.width, boss.rect.height);
+        }
 
         for (SlashWave s : slashesJogador) if (s.active && slashTex != null) batch.draw(slashTex, s.rect.x, s.rect.y, 24, 24, 48, 48, 1f, 1f, s.angle, 0, 0, slashTex.getWidth(), slashTex.getHeight(), false, false);
         for (SlashWave p : pedrasBoss) if (p.active && rochaTex != null) batch.draw(rochaTex, p.rect.x, p.rect.y, 32, 32, 64, 64, 1.5f, 1.5f, p.angle, 0, 0, rochaTex.getWidth(), rochaTex.getHeight(), false, false);
@@ -146,6 +182,11 @@ public class TitanScreen implements Screen {
 
         shapeRenderer.setProjectionMatrix(camera.combined);
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        if (boss.ativo && bossTex == null) {
+            shapeRenderer.setColor(bossState == 1 ? 1f : 0.8f, bossState == 1 ? 0.85f : 0.1f, 0.1f, 1f);
+            shapeRenderer.rect(boss.rect.x, boss.rect.y, boss.rect.width, boss.rect.height);
+        }
+
         for (Enemy m : minions) {
             if (m.ativo) {
                 shapeRenderer.setColor(0.8f, 0f, 0f, 1);
@@ -158,10 +199,28 @@ public class TitanScreen implements Screen {
 
         desenharHUD();
         desenharFade(delta);
+
+        // --- SISTEMA DE INVENTARIO: RENDERIZA POR CIMA DE TUDO ---
+        if (saveData.inventario != null && saveData.inventario.aberto) {
+            saveData.inventario.render(batch, font, batch.getProjectionMatrix(), saveData);
+        }
     }
 
     private void update(float delta) {
         if (fadingOut) return;
+
+        // --- CONTROLE DO INVENTÁRIO & PAUSA ---
+        if (saveData.inventario != null) {
+            if (Gdx.input.isKeyJustPressed(Input.Keys.I)) {
+                saveData.inventario.aberto = !saveData.inventario.aberto;
+            }
+            if (saveData.inventario.aberto) {
+                if (Gdx.input.isKeyJustPressed(Input.Keys.C)) {
+                    saveData.inventario.usarComida(saveData);
+                }
+                return; // PAUSA O JOGO AQUI
+            }
+        }
 
         if (somEnemyTimer > 0f) somEnemyTimer -= delta;
         if (cooldown > 0f) cooldown -= delta;
@@ -180,10 +239,12 @@ public class TitanScreen implements Screen {
         }
 
         boolean moving = false;
-        if (Gdx.input.isKeyPressed(Input.Keys.A)) { player.x -= 300 * delta; moving = true; }
-        if (Gdx.input.isKeyPressed(Input.Keys.D)) { player.x += 300 * delta; moving = true; }
-        if (Gdx.input.isKeyPressed(Input.Keys.W)) { player.y += 300 * delta; moving = true; }
-        if (Gdx.input.isKeyPressed(Input.Keys.S)) { player.y -= 300 * delta; moving = true; }
+        float dx = 0f, dy = 0f;
+        if (Gdx.input.isKeyPressed(Input.Keys.A)) { dx -= 300 * delta; moving = true; }
+        if (Gdx.input.isKeyPressed(Input.Keys.D)) { dx += 300 * delta; moving = true; }
+        if (Gdx.input.isKeyPressed(Input.Keys.W)) { dy += 300 * delta; moving = true; }
+        if (Gdx.input.isKeyPressed(Input.Keys.S)) { dy -= 300 * delta; moving = true; }
+        WorldCollision.movePlayer(player, dx, dy, pedrasMapa, 1200f, 1200f);
         stateTime += delta;
 
         if (estadoJogador != 2) {
@@ -215,6 +276,16 @@ public class TitanScreen implements Screen {
             }
         }
 
+        for (int i = comidas.size - 1; i >= 0; i--) {
+            FoodDrop food = comidas.get(i);
+            if (player.overlaps(food.rect)) {
+                saveData.inventario.add("COMIDA");
+                comidas.removeIndex(i);
+                mensagemAviso = "+1 COMIDA! (+12 O2 ao usar)";
+                avisoTimer = 2f;
+            }
+        }
+
         if (Gdx.input.isKeyJustPressed(Input.Keys.R) && !isReloading && saveData.municao < 25) {
             isReloading = true; reloadTimer = 1.5f; mensagemAviso = "RECARREGANDO..."; avisoTimer = 1.5f;
             SoundManager.playSound("reload");
@@ -232,7 +303,7 @@ public class TitanScreen implements Screen {
                     tirosMinions.add(new SlashWave(m.rect.x, m.rect.y, player.x, player.y));
                     m.cooldownTiro = 2.5f;
                 }
-                if (m.rect.overlaps(player)) saveData.o2 -= 10f * delta;
+                if (m.rect.overlaps(player)) UpgradeSystem.aplicarDano(saveData, 10f * delta);
             } else {
                 minions.removeIndex(i);
             }
@@ -267,14 +338,14 @@ public class TitanScreen implements Screen {
                     bossState = 0; bossTimer = 0f;
                 }
             }
-            if (boss.rect.overlaps(player)) saveData.o2 -= 20f * delta;
+            if (boss.rect.overlaps(player)) UpgradeSystem.aplicarDano(saveData, 12f * delta);
         }
 
-        if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && saveData.municao > 0 && cooldown <= 0f && !isReloading) {
+        if ((Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) || Gdx.input.isKeyJustPressed(Input.Keys.SPACE)) && saveData.municao > 0 && cooldown <= 0f && !isReloading) {
             estadoJogador = 2;
             slashAnimTimer = 0.3f;
             stateTime = 0f;
-            saveData.municao--; cooldown = 0.25f;
+            saveData.municao--; saveData.inventario.municao = saveData.municao; cooldown = Math.max(0.14f, 0.25f - 0.02f * saveData.inventario.nivelArma);
             SoundManager.playSound("slash");
 
             Vector3 m = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
@@ -287,25 +358,32 @@ public class TitanScreen implements Screen {
             if (!s.active) { slashesJogador.removeIndex(i); continue; }
 
             if (boss.ativo && s.rect.overlaps(boss.rect)) {
-                boss.hp -= 25; s.active = false;
+                boss.hp -= UpgradeSystem.danoArma(saveData); s.active = false;
                 SoundManager.playSound("hit_enemy");
                 if (boss.hp <= 0) {
-                    boss.ativo = false; fadingOut = true; nextScreen = new VictoryScreen(game, saveData);
+                    boss.ativo = false;
+                    saveData.bossTitaDerrotado = true;
+                    saveData.inventario.add("CHAVE_TITA");
+                    saveData.fase = "CALISTO";
+                    saveData.salvar();
+                    fadingOut = true; nextScreen = new CallistoScreen(game, saveData);
                 }
                 continue;
             }
 
-            // Dano na Horda com o Drop de O2 adicionado
             for (Enemy m : minions) {
                 if (m.ativo && s.rect.overlaps(m.rect)) {
-                    m.hp -= 40; s.active = false;
+                    m.hp -= UpgradeSystem.danoArma(saveData); s.active = false;
                     SoundManager.playSound("hit_enemy");
 
                     if (m.hp <= 0) {
                         m.ativo = false;
+                        if (UpgradeSystem.registerKill(saveData)) { mensagemAviso = saveData.ultimoUpgrade; avisoTimer = 2.5f; }
                         if (MathUtils.randomBoolean(0.5f)) {
                             dropsO2.add(new ItemDrop(m.rect.x, m.rect.y, 0));
                         }
+                        // --- Adicionada chance do lacaio do boss dropar COMIDA ---
+                        if (saveData.inventario != null && MathUtils.randomBoolean(0.3f)) saveData.inventario.add("COMIDA");
                     }
                     break;
                 }
@@ -316,7 +394,7 @@ public class TitanScreen implements Screen {
             SlashWave p = pedrasBoss.get(i);
             p.update(delta);
             if (p.rect.overlaps(player)) {
-                saveData.o2 -= 15f;
+                UpgradeSystem.aplicarDano(saveData, 15f);
                 p.active = false;
             }
             if (!p.active) pedrasBoss.removeIndex(i);
@@ -326,7 +404,7 @@ public class TitanScreen implements Screen {
             SlashWave t = tirosMinions.get(i);
             t.update(delta);
             if (t.rect.overlaps(player)) {
-                saveData.o2 -= 10f;
+                UpgradeSystem.aplicarDano(saveData, 10f);
                 t.active = false;
             }
             if (!t.active) tirosMinions.removeIndex(i);

@@ -18,11 +18,15 @@ import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Array;
 import com.modulo06.echoesmoon.entities.Enemy;
+import com.modulo06.echoesmoon.entities.FoodDrop;
+import com.modulo06.echoesmoon.entities.WorldRock;
 import com.modulo06.echoesmoon.entities.ItemDrop;
 import com.modulo06.echoesmoon.entities.SlashWave;
 import com.modulo06.echoesmoon.systems.DialogSystem;
 import com.modulo06.echoesmoon.systems.GameSaveData;
 import com.modulo06.echoesmoon.systems.SoundManager;
+import com.modulo06.echoesmoon.systems.UpgradeSystem;
+import com.modulo06.echoesmoon.systems.WorldCollision;
 
 public class MarsScreen implements Screen {
     private Game game;
@@ -37,17 +41,18 @@ public class MarsScreen implements Screen {
     private Array<SlashWave> slashes;
     private Array<SlashWave> tirosInimigos;
     private Array<ItemDrop> dropsO2;
+    private Array<FoodDrop> comidas;
+    private Array<WorldRock> pedras;
     private DialogSystem dialog;
 
-    private Texture fundoTex, slashTex, alienTex, radioTex, portraitRadio, portalTitaTex, o2Tex;
+    private Texture fundoTex, slashTex, alienTex, radioTex, portraitRadio, portalTitaTex, o2Tex, foodTex, rockTex;
 
-    // Variáveis de Animação e Estado
     private Animation<TextureRegion> animIdle, animWalk, animSlash;
     private int estadoJogador = 0;
     private float slashAnimTimer = 0f;
     private float timerPasso = 0f;
     private float stateTime = 0f;
-    private float somEnemyTimer = 0f; // Timer para som do alien
+    private float somEnemyTimer = 0f;
 
     private boolean wavesIniciadas = false;
     private boolean titaLiberado = false;
@@ -82,8 +87,12 @@ public class MarsScreen implements Screen {
         slashes = new Array<>();
         tirosInimigos = new Array<>();
         dropsO2 = new Array<>();
+        comidas = new Array<>();
+        pedras = new Array<>();
+        saveData.sincronizarInventario();
 
         carregarTexturas();
+        spawnAmbientObjects();
         SoundManager.playMusic("marte", true);
     }
 
@@ -95,6 +104,8 @@ public class MarsScreen implements Screen {
         portraitRadio = safeLoad("portrait_radio.png");
         portalTitaTex = safeLoad("portal_tita.png");
         o2Tex = safeLoad("o2.png");
+        foodTex = safeLoad("food.png");
+        rockTex = safeLoad("pedra.png");
 
         Texture idleTex = safeLoad("player_lunar.png");
         Texture walkTex = safeLoad("player_lunar_walk.png");
@@ -102,8 +113,22 @@ public class MarsScreen implements Screen {
 
         if (idleTex != null) animIdle = new Animation<>(0.2f, TextureRegion.split(idleTex, idleTex.getWidth() / 4, idleTex.getHeight())[0]);
         if (walkTex != null) animWalk = new Animation<>(0.12f, TextureRegion.split(walkTex, walkTex.getWidth() / 4, walkTex.getHeight())[0]);
-        // Correção de frame (dividido por 4)
         if (slashTexAnim != null) animSlash = new Animation<>(0.1f, TextureRegion.split(slashTexAnim, slashTexAnim.getWidth() / 4, slashTexAnim.getHeight())[0]);
+    }
+
+
+    private void spawnAmbientObjects() {
+        Array<Rectangle> forbidden = new Array<>();
+        forbidden.add(npcRadio);
+        forbidden.add(portalTita);
+        WorldRock.spawnMany(pedras, 30, 1200f, 1200f, player, forbidden, 180f);
+        for (int i = 0; i < 11; i++) {
+            float x = MathUtils.random(80f, 1120f);
+            float y = MathUtils.random(80f, 1120f);
+            Rectangle r = new Rectangle(x, y, 28, 28);
+            if (r.overlaps(player) || r.overlaps(npcRadio) || r.overlaps(portalTita)) continue;
+            comidas.add(new FoodDrop(x, y));
+        }
     }
 
     private Texture safeLoad(String path) {
@@ -128,6 +153,14 @@ public class MarsScreen implements Screen {
             font.draw(batch, "PORTAL TITA", portalTita.x + 10, portalTita.y + 120);
         }
 
+        for (WorldRock rock : pedras) {
+            if (rockTex != null) {
+                batch.setColor(0.68f, 0.46f, 0.38f, 1f);
+                batch.draw(rockTex, rock.rect.x, rock.rect.y, rock.rect.width, rock.rect.height);
+                batch.setColor(1f, 1f, 1f, 1f);
+            }
+        }
+        for (FoodDrop food : comidas) if (foodTex != null) batch.draw(foodTex, food.rect.x, food.rect.y, food.rect.width, food.rect.height);
         for (ItemDrop d : dropsO2) if (o2Tex != null) batch.draw(o2Tex, d.rect.x, d.rect.y, d.rect.width, d.rect.height);
         for (Enemy e : enemies) if (e.ativo && alienTex != null) batch.draw(alienTex, e.rect.x, e.rect.y, e.rect.width, e.rect.height);
 
@@ -165,10 +198,28 @@ public class MarsScreen implements Screen {
 
         desenharHUD();
         desenharFade(delta);
+
+        // --- SISTEMA DE INVENTARIO: RENDERIZA POR CIMA DE TUDO ---
+        if (saveData.inventario != null && saveData.inventario.aberto) {
+            saveData.inventario.render(batch, font, batch.getProjectionMatrix(), saveData);
+        }
     }
 
     private void update(float delta) {
         if (fadingOut) return;
+
+        // --- CONTROLE DO INVENTÁRIO & PAUSA ---
+        if (saveData.inventario != null) {
+            if (Gdx.input.isKeyJustPressed(Input.Keys.I)) {
+                saveData.inventario.aberto = !saveData.inventario.aberto;
+            }
+            if (saveData.inventario.aberto) {
+                if (Gdx.input.isKeyJustPressed(Input.Keys.C)) {
+                    saveData.inventario.usarComida(saveData);
+                }
+                return; // PAUSA O JOGO AQUI
+            }
+        }
 
         if (somEnemyTimer > 0f) somEnemyTimer -= delta;
         if (cooldown > 0f) cooldown -= delta;
@@ -192,6 +243,16 @@ public class MarsScreen implements Screen {
             mensagemAviso = "CHECKPOINT SALVO EM MARTE!"; avisoTimer = 2.0f;
         }
 
+        for (int i = comidas.size - 1; i >= 0; i--) {
+            FoodDrop food = comidas.get(i);
+            if (player.overlaps(food.rect)) {
+                saveData.inventario.add("COMIDA");
+                comidas.removeIndex(i);
+                mensagemAviso = "+1 COMIDA! (+12 O2 ao usar)";
+                avisoTimer = 2f;
+            }
+        }
+
         if (Gdx.input.isKeyJustPressed(Input.Keys.R) && !isReloading && saveData.municao < 25) {
             isReloading = true; reloadTimer = 1.5f; mensagemAviso = "RECARREGANDO..."; avisoTimer = 1.5f;
             SoundManager.playSound("reload");
@@ -207,10 +268,12 @@ public class MarsScreen implements Screen {
         }
 
         boolean moving = false;
-        if (Gdx.input.isKeyPressed(Input.Keys.A)) { player.x -= 300 * delta; moving = true; }
-        if (Gdx.input.isKeyPressed(Input.Keys.D)) { player.x += 300 * delta; moving = true; }
-        if (Gdx.input.isKeyPressed(Input.Keys.W)) { player.y += 300 * delta; moving = true; }
-        if (Gdx.input.isKeyPressed(Input.Keys.S)) { player.y -= 300 * delta; moving = true; }
+        float dx = 0f, dy = 0f;
+        if (Gdx.input.isKeyPressed(Input.Keys.A)) { dx -= 300 * delta; moving = true; }
+        if (Gdx.input.isKeyPressed(Input.Keys.D)) { dx += 300 * delta; moving = true; }
+        if (Gdx.input.isKeyPressed(Input.Keys.W)) { dy += 300 * delta; moving = true; }
+        if (Gdx.input.isKeyPressed(Input.Keys.S)) { dy -= 300 * delta; moving = true; }
+        WorldCollision.movePlayer(player, dx, dy, pedras, 1200f, 1200f);
         stateTime += delta;
 
         if (estadoJogador != 2) {
@@ -234,9 +297,9 @@ public class MarsScreen implements Screen {
         for (int i = dropsO2.size - 1; i >= 0; i--) {
             ItemDrop d = dropsO2.get(i);
             if (player.overlaps(d.rect)) {
-                saveData.o2 = Math.min(100, saveData.o2 + 10);
+                saveData.o2 = Math.min(100, saveData.o2 + 20);
                 SoundManager.playSound("pickup");
-                mensagemAviso = "+10 O2 COLETADO!"; avisoTimer = 1.5f;
+                mensagemAviso = "+20 O2 COLETADO!"; avisoTimer = 1.5f;
                 dropsO2.removeIndex(i);
             }
         }
@@ -256,7 +319,7 @@ public class MarsScreen implements Screen {
                 enemies.add(new Enemy(MathUtils.random(100, 1100), MathUtils.random(100, 1100), 1));
                 if (somEnemyTimer <= 0) {
                     SoundManager.playSound("enemy");
-                    somEnemyTimer = 25f; // Limite de áudio
+                    somEnemyTimer = 25f;
                 }
                 spawnTimer = 0f;
             }
@@ -264,16 +327,19 @@ public class MarsScreen implements Screen {
                 waveState++; inimigosMortosNaWave = 0; totalInimigosNaWave += 3;
                 if (waveState > 3) {
                     titaLiberado = true;
+                    saveData.marteMissoesOk = true;
+                    saveData.fase = "MARTE_BOSS";
+                    saveData.salvar();
                     SoundManager.playMusic("marte", true);
                 }
             }
         }
 
-        if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && saveData.municao > 0 && cooldown <= 0f && !isReloading) {
+        if ((Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) || Gdx.input.isKeyJustPressed(Input.Keys.SPACE)) && saveData.municao > 0 && cooldown <= 0f && !isReloading) {
             estadoJogador = 2;
             slashAnimTimer = 0.3f;
             stateTime = 0f;
-            saveData.municao--; cooldown = 0.25f;
+            saveData.municao--; saveData.inventario.municao = saveData.municao; cooldown = Math.max(0.14f, 0.25f - 0.02f * saveData.inventario.nivelArma);
             SoundManager.playSound("slash");
             Vector3 m = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
             camera.unproject(m); slashes.add(new SlashWave(player.x, player.y, m.x, m.y));
@@ -284,10 +350,13 @@ public class MarsScreen implements Screen {
             if (!s.active) { slashes.removeIndex(i); continue; }
             for (Enemy e : enemies) {
                 if (e.ativo && s.rect.overlaps(e.rect)) {
-                    e.hp -= 40; s.active = false;
+                    e.hp -= UpgradeSystem.danoArma(saveData); s.active = false;
                     if (e.hp <= 0) {
                         e.ativo = false; inimigosMortosNaWave++;
+                        if (UpgradeSystem.registerKill(saveData)) { mensagemAviso = saveData.ultimoUpgrade; avisoTimer = 2.5f; }
                         if (MathUtils.randomBoolean(0.5f)) dropsO2.add(new ItemDrop(e.rect.x, e.rect.y, 0));
+                        // --- Adicionada chance do inimigo dropar COMIDA para o Inventário ---
+                        if (saveData.inventario != null && MathUtils.randomBoolean(0.3f)) saveData.inventario.add("COMIDA");
                     }
                 }
             }
@@ -301,19 +370,20 @@ public class MarsScreen implements Screen {
                     tirosInimigos.add(new SlashWave(e.rect.x, e.rect.y, player.x, player.y));
                     e.cooldownTiro = 2.5f;
                 }
-                if (e.rect.overlaps(player)) saveData.o2 -= 10f * delta;
+                if (e.rect.overlaps(player)) UpgradeSystem.aplicarDano(saveData, 10f * delta);
             } else enemies.removeIndex(i);
         }
 
         for (int i = tirosInimigos.size - 1; i >= 0; i--) {
             SlashWave s = tirosInimigos.get(i); s.update(delta);
-            if (s.rect.overlaps(player)) { saveData.o2 -= 10f; s.active = false; }
+            if (s.rect.overlaps(player)) { UpgradeSystem.aplicarDano(saveData, 10f); s.active = false; }
             if (!s.active) tirosInimigos.removeIndex(i);
         }
 
         if (titaLiberado && player.overlaps(portalTita) && Gdx.input.isKeyJustPressed(Input.Keys.E)) {
-            saveData.fase = "TITA"; saveData.salvar();
-            fadingOut = true; nextScreen = new TitanScreen(game, saveData);
+            saveData.fase = "MARTE_BOSS";
+            saveData.salvar();
+            fadingOut = true; nextScreen = new BossMarteScreen(game, saveData);
         }
     }
 
@@ -340,7 +410,7 @@ public class MarsScreen implements Screen {
         font.draw(batch, "MUNICÃO: " + saveData.municao, 30, 95);
         font.draw(batch, "PLANETA: MARTE", 30, 115);
 
-        font.draw(batch, "[TAB] Ocultar Objetivos | [F5] Salvar Checkpoint | [R] Recarregar", 20, 715);
+        font.draw(batch, "[TAB] Ocultar Quest | [I] Inventario | [F5] Salvar Checkpoint | [R] Recarregar", 20, 715);
 
         if (isReloading) font.draw(batch, "RECARREGANDO...", 130, 95);
         if (avisoTimer > 0) font.draw(batch, mensagemAviso, 550, 100);
