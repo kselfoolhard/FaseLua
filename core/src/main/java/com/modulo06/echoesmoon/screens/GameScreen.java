@@ -21,8 +21,10 @@ import com.modulo06.echoesmoon.entities.FoodDrop;
 import com.modulo06.echoesmoon.entities.WorldRock;
 import com.modulo06.echoesmoon.entities.ItemDrop;
 import com.modulo06.echoesmoon.entities.SlashWave;
+import com.modulo06.echoesmoon.systems.CrosshairUtil;
 import com.modulo06.echoesmoon.systems.DialogSystem;
 import com.modulo06.echoesmoon.systems.GameSaveData;
+import com.modulo06.echoesmoon.systems.SegredoSystem;
 import com.modulo06.echoesmoon.systems.SoundManager;
 import com.modulo06.echoesmoon.systems.UpgradeSystem;
 import com.modulo06.echoesmoon.systems.WorldCollision;
@@ -35,7 +37,7 @@ public class GameScreen implements Screen {
     private ShapeRenderer shapeRenderer;
     private BitmapFont font;
 
-    private Texture fundoLuaTex, portalTex, slashTex, bancadaTex, alienTex, portraitOficial, npcTex, baseTex, caixaTex, foodTex, rockTex;
+    private Texture fundoLuaTex, portalTex, slashTex, bancadaTex, alienTex, portraitOficial, npcTex, baseTex, caixaTex, foodTex, iceTex;
 
     private Animation<TextureRegion> animIdle, animWalk, animSlash;
     private int estadoJogador = 0;
@@ -45,6 +47,7 @@ public class GameScreen implements Screen {
     private float somEnemyTimer = 0f;
 
     private Rectangle player, portalParaMarte, bancada, zonaInteracao, npcLua, safeZone;
+    private Rectangle segredoLua;
     private Array<SlashWave> slashes;
     private Array<Enemy> enemies;
     private Array<ItemDrop> caixasCrafting;
@@ -88,6 +91,8 @@ public class GameScreen implements Screen {
 
         npcLua = new Rectangle(250, 350, 36, 54);
         safeZone = new Rectangle(180, 280, 160, 160);
+        // Bancada escondida (disfarcada de gelo) da rota estranha — bem no cantinho do mapa.
+        segredoLua = new Rectangle(1120, 60, 40, 40);
 
         this.saveData.sincronizarInventario();
         this.armaCraftada = this.saveData.inventario.temArma;
@@ -114,7 +119,7 @@ public class GameScreen implements Screen {
         baseTex = safeLoad("base.png");
         caixaTex = safeLoad("item.png");
         foodTex = safeLoad("food.png");
-        rockTex = safeLoad("pedra.png");
+        iceTex = safeLoad("ice.png");
 
         Texture idleTex = safeLoad("player_lunar.png");
         Texture walkTex = safeLoad("player_lunar_walk.png");
@@ -137,7 +142,8 @@ public class GameScreen implements Screen {
         forbidden.add(bancada);
         forbidden.add(npcLua);
         forbidden.add(portalParaMarte);
-        WorldRock.spawnMany(pedras, 28, WORLD_WIDTH, WORLD_HEIGHT, player, forbidden, 180f);
+        // As pedras do mapa foram removidas: a colisao delas estava ruim e atrapalhava
+        // a movimentacao. O array "pedras" fica vazio de proposito.
         for (int i = 0; i < 10; i++) {
             float x = MathUtils.random(80f, WORLD_WIDTH - 80f);
             float y = MathUtils.random(80f, WORLD_HEIGHT - 80f);
@@ -177,12 +183,11 @@ public class GameScreen implements Screen {
         if (bancadaTex != null) batch.draw(bancadaTex, bancada.x, bancada.y, bancada.width, bancada.height);
         if (npcTex != null) batch.draw(npcTex, npcLua.x, npcLua.y, npcLua.width, npcLua.height);
 
-        for (WorldRock rock : pedras) {
-            if (rockTex != null) {
-                batch.setColor(0.62f, 0.68f, 0.74f, 1f);
-                batch.draw(rockTex, rock.rect.x, rock.rect.y, rock.rect.width, rock.rect.height);
-                batch.setColor(1f, 1f, 1f, 1f);
-            }
+        if (iceTex != null && !saveData.segredoLuaEncontrado) {
+            // Bancada escondida: quase invisivel, so uma sombra de gelo no chao.
+            batch.setColor(1f, 1f, 1f, 0.22f);
+            batch.draw(iceTex, segredoLua.x, segredoLua.y, segredoLua.width, segredoLua.height);
+            batch.setColor(1f, 1f, 1f, 1f);
         }
         for (FoodDrop food : comidas) if (foodTex != null) batch.draw(foodTex, food.rect.x, food.rect.y, food.rect.width, food.rect.height);
         for (ItemDrop caixa : caixasCrafting) if (caixaTex != null) batch.draw(caixaTex, caixa.rect.x, caixa.rect.y, caixa.rect.width, caixa.rect.height);
@@ -232,6 +237,8 @@ public class GameScreen implements Screen {
         if (saveData.inventario != null && saveData.inventario.aberto) {
             saveData.inventario.render(batch, font, batch.getProjectionMatrix(), saveData);
         }
+
+        CrosshairUtil.desenharMira(shapeRenderer);
     }
 
     private void desenharHUD() {
@@ -333,6 +340,16 @@ public class GameScreen implements Screen {
         }
 
         if (Gdx.input.isKeyJustPressed(Input.Keys.TAB)) mostrarQuest = !mostrarQuest;
+
+        if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && !saveData.segredoLuaEncontrado) {
+            Vector3 cliqueMundo = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+            camera.unproject(cliqueMundo);
+            if (SegredoSystem.checarClique(saveData, SegredoSystem.LUA, segredoLua, cliqueMundo.x, cliqueMundo.y)) {
+                mensagemAviso = "Voce sentiu algo estranho sob o gelo...";
+                avisoTimer = 2.5f;
+                SoundManager.playSound("pickup");
+            }
+        }
 
         if (Gdx.input.isKeyJustPressed(Input.Keys.F5)) {
             saveData.fase = "LUA"; saveData.salvar();

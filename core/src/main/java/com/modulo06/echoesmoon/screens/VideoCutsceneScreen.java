@@ -39,6 +39,10 @@ public class VideoCutsceneScreen implements Screen {
     private Texture fallbackTexture;
     private float fallbackTimer = 0f;
     private boolean videoReady = false;
+    private float safetyTimer = 0f;
+    // Trava de seguranca: se o player nao tiver como detectar o fim (isFinished ausente
+    // em algumas implementacoes do gdx-video), nao deixamos o jogador preso na cutscene.
+    private static final float MAX_DURACAO_SEM_DETECCAO = 90f;
 
     public VideoCutsceneScreen(Game game, String assetPath, Screen nextScreen, boolean allowSkip) {
         this.game = game;
@@ -68,17 +72,15 @@ public class VideoCutsceneScreen implements Screen {
             try { isFinishedMethod = playerClass.getMethod("isFinished"); }
             catch (NoSuchMethodException ignored) { isFinishedMethod = null; }
 
-            Method load = playerClass.getMethod("load", com.badlogic.gdx.files.FileHandle.class);
-            load.invoke(videoPlayer, Gdx.files.internal(assetPath));
-
-            try {
-                playerClass.getMethod("play").invoke(videoPlayer);
-            } catch (NoSuchMethodException e) {
-                playerClass.getMethod("play", com.badlogic.gdx.files.FileHandle.class)
-                        .invoke(videoPlayer, Gdx.files.internal(assetPath));
-            }
+            // A API do gdx-video nao tem um metodo "load" separado: o video e aberto
+            // e comeca a tocar direto com play(FileHandle). Chamar um "load" (que nao
+            // existe na interface VideoPlayer) sempre derrubava a cutscene antes,
+            // caindo silenciosamente no fallback de texto.
+            playerClass.getMethod("play", com.badlogic.gdx.files.FileHandle.class)
+                    .invoke(videoPlayer, Gdx.files.internal(assetPath));
 
             videoReady = true;
+            safetyTimer = 0f;
         } catch (Throwable ignored) {
             videoReady = false;
             disposeVideo();
@@ -101,9 +103,19 @@ public class VideoCutsceneScreen implements Screen {
                 Object texture = getTextureMethod.invoke(videoPlayer);
                 if (texture instanceof Texture) frame = (Texture) texture;
 
-                if (isFinishedMethod != null && Boolean.TRUE.equals(isFinishedMethod.invoke(videoPlayer))) {
-                    finish();
-                    return;
+                if (isFinishedMethod != null) {
+                    if (Boolean.TRUE.equals(isFinishedMethod.invoke(videoPlayer))) {
+                        finish();
+                        return;
+                    }
+                } else {
+                    // Sem deteccao de fim disponivel: usa uma trava de tempo maxima para
+                    // nunca deixar o jogador preso numa cutscene sem saida.
+                    safetyTimer += delta;
+                    if (safetyTimer >= MAX_DURACAO_SEM_DETECCAO) {
+                        finish();
+                        return;
+                    }
                 }
             } catch (Throwable ignored) {
                 videoReady = false;
@@ -131,6 +143,11 @@ public class VideoCutsceneScreen implements Screen {
         }
 
         if (allowSkip && Gdx.input.isKeyJustPressed(Input.Keys.ENTER)) {
+            finish();
+        }
+        // Saida de emergencia: ESC sempre funciona, mesmo em cutscenes sem skip,
+        // para nunca travar o jogador numa tela de video.
+        if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
             finish();
         }
         batch.end();

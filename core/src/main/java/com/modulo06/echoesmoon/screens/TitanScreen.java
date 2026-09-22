@@ -22,8 +22,10 @@ import com.modulo06.echoesmoon.entities.FoodDrop;
 import com.modulo06.echoesmoon.entities.WorldRock;
 import com.modulo06.echoesmoon.entities.ItemDrop;
 import com.modulo06.echoesmoon.entities.SlashWave;
+import com.modulo06.echoesmoon.systems.CrosshairUtil;
 import com.modulo06.echoesmoon.systems.DialogSystem;
 import com.modulo06.echoesmoon.systems.GameSaveData;
+import com.modulo06.echoesmoon.systems.SegredoSystem;
 import com.modulo06.echoesmoon.systems.SoundManager;
 import com.modulo06.echoesmoon.systems.UpgradeSystem;
 import com.modulo06.echoesmoon.systems.WorldCollision;
@@ -37,6 +39,7 @@ public class TitanScreen implements Screen {
     private BitmapFont font;
 
     private Rectangle player;
+    private Rectangle segredoTita;
     private Enemy boss;
     private Array<Enemy> minions;
     private Array<SlashWave> slashesJogador;
@@ -47,7 +50,7 @@ public class TitanScreen implements Screen {
     private Array<WorldRock> pedrasMapa;
     private DialogSystem dialog;
 
-    private Texture fundoTex, slashTex, bossTex, rochaTex, portraitBoss, alienTex, o2Tex, foodTex, pedraMapaTex;
+    private Texture fundoTex, slashTex, bossTex, rochaTex, portraitBoss, alienTex, o2Tex, foodTex, iceTex;
 
     private Animation<TextureRegion> animIdle, animWalk, animSlash;
     private int estadoJogador = 0;
@@ -76,6 +79,7 @@ public class TitanScreen implements Screen {
         dialog = new DialogSystem();
 
         player = new Rectangle(100, 100, 32, 48);
+        segredoTita = new Rectangle(1120, 1120, 40, 40);
 
         boss = new Enemy(800, 800, 0);
         boss.rect.width = 110;
@@ -112,7 +116,7 @@ public class TitanScreen implements Screen {
         portraitBoss = safeLoad("portrait_boss.png");
         o2Tex = safeLoad("o2.png");
         foodTex = safeLoad("food.png");
-        pedraMapaTex = safeLoad("pedra.png");
+        iceTex = safeLoad("ice.png");
 
         Texture idleTex = safeLoad("player_lunar.png");
         Texture walkTex = safeLoad("player_lunar_walk.png");
@@ -128,7 +132,8 @@ public class TitanScreen implements Screen {
         Array<Rectangle> forbidden = new Array<>();
         forbidden.add(player);
         forbidden.add(boss.rect);
-        WorldRock.spawnMany(pedrasMapa, 34, 1200f, 1200f, player, forbidden, 220f);
+        // As pedras do mapa foram removidas: a colisao delas estava ruim e atrapalhava
+        // a movimentacao. O array "pedrasMapa" fica vazio de proposito.
         for (int i = 0; i < 12; i++) {
             float x = MathUtils.random(70f, 1120f);
             float y = MathUtils.random(70f, 1120f);
@@ -154,12 +159,10 @@ public class TitanScreen implements Screen {
         batch.begin();
         if (fundoTex != null) batch.draw(fundoTex, 0, 0, 1200, 1200);
 
-        for (WorldRock rock : pedrasMapa) {
-            if (pedraMapaTex != null) {
-                batch.setColor(0.40f, 0.55f, 0.62f, 1f);
-                batch.draw(pedraMapaTex, rock.rect.x, rock.rect.y, rock.rect.width, rock.rect.height);
-                batch.setColor(1f, 1f, 1f, 1f);
-            }
+        if (iceTex != null && !saveData.segredoTitaEncontrado) {
+            batch.setColor(1f, 1f, 1f, 0.22f);
+            batch.draw(iceTex, segredoTita.x, segredoTita.y, segredoTita.width, segredoTita.height);
+            batch.setColor(1f, 1f, 1f, 1f);
         }
         for (FoodDrop food : comidas) if (foodTex != null) batch.draw(foodTex, food.rect.x, food.rect.y, food.rect.width, food.rect.height);
         for (ItemDrop d : dropsO2) if (o2Tex != null) batch.draw(o2Tex, d.rect.x, d.rect.y, d.rect.width, d.rect.height);
@@ -204,6 +207,8 @@ public class TitanScreen implements Screen {
         if (saveData.inventario != null && saveData.inventario.aberto) {
             saveData.inventario.render(batch, font, batch.getProjectionMatrix(), saveData);
         }
+
+        CrosshairUtil.desenharMira(shapeRenderer);
     }
 
     private void update(float delta) {
@@ -231,6 +236,16 @@ public class TitanScreen implements Screen {
         if (dialog.isOpen()) {
             if (Gdx.input.isKeyJustPressed(Input.Keys.E) || Gdx.input.isKeyJustPressed(Input.Keys.ENTER)) dialog.next();
             return;
+        }
+
+        if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && !saveData.segredoTitaEncontrado) {
+            Vector3 cliqueMundo = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+            camera.unproject(cliqueMundo);
+            if (SegredoSystem.checarClique(saveData, SegredoSystem.TITA, segredoTita, cliqueMundo.x, cliqueMundo.y)) {
+                mensagemAviso = "Voce sentiu algo estranho sob o gelo...";
+                avisoTimer = 2.5f;
+                SoundManager.playSound("pickup");
+            }
         }
 
         if (estadoJogador == 2) {

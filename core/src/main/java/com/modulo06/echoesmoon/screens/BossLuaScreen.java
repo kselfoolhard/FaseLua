@@ -4,12 +4,13 @@ import com.badlogic.gdx.Game;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Screen;
-import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.Animation;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Rectangle;
@@ -17,182 +18,385 @@ import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Array;
 import com.modulo06.echoesmoon.entities.BossLua;
+import com.modulo06.echoesmoon.entities.Enemy;
 import com.modulo06.echoesmoon.entities.FoodDrop;
+import com.modulo06.echoesmoon.entities.ItemDrop;
 import com.modulo06.echoesmoon.entities.SlashWave;
-import com.modulo06.echoesmoon.entities.WorldRock;
+import com.modulo06.echoesmoon.systems.CrosshairUtil;
+import com.modulo06.echoesmoon.systems.DialogSystem;
 import com.modulo06.echoesmoon.systems.GameSaveData;
+import com.modulo06.echoesmoon.systems.SoundManager;
 import com.modulo06.echoesmoon.systems.UpgradeSystem;
 import com.modulo06.echoesmoon.systems.WorldCollision;
 
+/**
+ * Guardiao da Lua — segue o mesmo "sistema de boss" da TitanScreen (camera
+ * seguindo o jogador, jogador animado, dialogo de intro, horda de lacaios,
+ * barra de HP no topo, transicao com fade), so trocando sprites/mensagens/
+ * dificuldade. E o primeiro chefe da jornada, entao e o mais fraco e a horda
+ * e mais rara — a progressao fica mais dificil em Marte, Tita e Calisto.
+ */
 public class BossLuaScreen implements Screen {
     private final Game game;
-    private final GameSaveData save;
+    private final GameSaveData saveData;
     private final OrthographicCamera camera = new OrthographicCamera();
     private final SpriteBatch batch = new SpriteBatch();
-    private final ShapeRenderer shape = new ShapeRenderer();
+    private final ShapeRenderer shapeRenderer = new ShapeRenderer();
     private final BitmapFont font = new BitmapFont();
-    private final BossLua boss;
-    private final Rectangle player = new Rectangle(100, 100, 32, 48);
-    private final Array<SlashWave> pedrasBoss = new Array<>();
-    private final Array<SlashWave> tirosJogador = new Array<>();
-    private final Array<FoodDrop> comidas = new Array<>();
-    private final Array<WorldRock> pedrasMapa = new Array<>();
-    private final float WORLD_W = 800f, WORLD_H = 600f;
-    private Texture fundoTex, bossTex, rockTex, foodTex, playerTex;
-    private float cooldown = 0f;
-    private float mensagemTimer = 0f;
-    private String mensagem = "";
+    private final DialogSystem dialog = new DialogSystem();
 
-    public BossLuaScreen(Game game, GameSaveData save) {
+    private final Rectangle player = new Rectangle(100, 100, 32, 48);
+    private final BossLua boss;
+    private final Array<Enemy> minions = new Array<>();
+    private final Array<SlashWave> slashesJogador = new Array<>();
+    private final Array<SlashWave> pedrasBoss = new Array<>();
+    private final Array<SlashWave> tirosMinions = new Array<>();
+    private final Array<ItemDrop> dropsO2 = new Array<>();
+    private final Array<FoodDrop> comidas = new Array<>();
+
+    private Texture fundoTex, slashTex, bossTex, rochaTex, portraitBoss, alienTex, o2Tex, foodTex;
+
+    private Animation<TextureRegion> animIdle, animWalk, animSlash;
+    private int estadoJogador = 0;
+    private float slashAnimTimer = 0f;
+    private float timerPasso = 0f;
+    private float stateTime = 0f;
+    private float somEnemyTimer = 0f;
+
+    private float hordeTimer = 0f, cooldown = 0f, reloadTimer = 0f, avisoTimer = 0f;
+    private String mensagemAviso = "";
+    private boolean isReloading = false;
+
+    private float fadeAlpha = 1.0f;
+    private boolean fadingOut = false;
+    private Screen nextScreen = null;
+
+    public BossLuaScreen(Game game, GameSaveData saveData) {
         this.game = game;
-        this.save = save;
-        this.save.sincronizarInventario();
-        camera.setToOrtho(false, WORLD_W, WORLD_H);
-        boss = new BossLua(560, 400);
+        this.saveData = saveData;
+        camera.setToOrtho(false, 800, 600);
+        saveData.sincronizarInventario();
+
+        boss = new BossLua(700, 700);
+
         carregarTexturas();
-        spawnAmbient();
+        spawnAmbientObjects();
+        SoundManager.playMusic("boss", true);
+        SoundManager.playSound("bossgrowl");
+
+        dialog.start(new String[]{
+            "Quem ousa pisar na minha cratera...",
+            "Eu sou o Guardiao da Lua. Seu oxigenio nao vai durar muito aqui."
+        }, portraitBoss != null ? portraitBoss : bossTex);
     }
 
     private void carregarTexturas() {
-        fundoTex = load("fundo.png");
-        bossTex = load("boss_lua.png");
-        rockTex = load("rocha_boss.png");
-        foodTex = load("food.png");
-        playerTex = load("player_lunar.png");
+        fundoTex = safeLoad("fundo.png");
+        bossTex = safeLoad("boss_lua.png");
+        alienTex = safeLoad("alien_lunar.png");
+        slashTex = safeLoad("slash_wave.png");
+        rochaTex = safeLoad("rocha_boss.png");
+        portraitBoss = safeLoad("portrait_boss.png");
+        o2Tex = safeLoad("o2.png");
+        foodTex = safeLoad("food.png");
+
+        Texture idleTex = safeLoad("player_lunar.png");
+        Texture walkTex = safeLoad("player_lunar_walk.png");
+        Texture slashTexAnim = safeLoad("player_lunar_slash.png");
+
+        if (idleTex != null) animIdle = new Animation<>(0.2f, TextureRegion.split(idleTex, idleTex.getWidth() / 4, idleTex.getHeight())[0]);
+        if (walkTex != null) animWalk = new Animation<>(0.12f, TextureRegion.split(walkTex, walkTex.getWidth() / 4, walkTex.getHeight())[0]);
+        if (slashTexAnim != null) animSlash = new Animation<>(0.1f, TextureRegion.split(slashTexAnim, slashTexAnim.getWidth() / 4, slashTexAnim.getHeight())[0]);
     }
 
-    private Texture load(String path) {
-        return Gdx.files.internal(path).exists() ? new Texture(path) : null;
-    }
-
-    private void spawnAmbient() {
-        Array<Rectangle> forbidden = new Array<>();
-        forbidden.add(boss.rect);
-        WorldRock.spawnMany(pedrasMapa, 10, WORLD_W, WORLD_H, player, forbidden, 150f);
-        for (int i = 0; i < 4; i++) {
-            float x = MathUtils.random(60f, WORLD_W - 60f);
-            float y = MathUtils.random(60f, WORLD_H - 60f);
+    private void spawnAmbientObjects() {
+        for (int i = 0; i < 8; i++) {
+            float x = MathUtils.random(70f, 1120f);
+            float y = MathUtils.random(70f, 1120f);
             Rectangle r = new Rectangle(x, y, 28, 28);
-            if (!r.overlaps(player) && !r.overlaps(boss.rect)) comidas.add(new FoodDrop(x, y));
+            if (r.overlaps(player) || r.overlaps(boss.rect)) continue;
+            comidas.add(new FoodDrop(x, y));
         }
     }
 
-    @Override public void render(float delta) {
+    private Texture safeLoad(String path) {
+        try { if (Gdx.files.internal(path).exists()) return new Texture(path); } catch (Exception ignored) {}
+        return null;
+    }
+
+    @Override
+    public void render(float delta) {
         update(delta);
-        Gdx.gl.glClearColor(0.07f, 0.08f, 0.12f, 1f);
+        Gdx.gl.glClearColor(0.05f, 0.08f, 0.18f, 1f);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
-        camera.position.set(WORLD_W / 2f, WORLD_H / 2f, 0f);
         camera.update();
 
         batch.setProjectionMatrix(camera.combined);
         batch.begin();
-        if (fundoTex != null) batch.draw(fundoTex, 0, 0, WORLD_W, WORLD_H);
-        for (WorldRock rock : pedrasMapa) {
-            if (rockTex != null) { batch.setColor(0.62f, 0.68f, 0.74f, 1f); batch.draw(rockTex, rock.rect.x, rock.rect.y, rock.rect.width, rock.rect.height); batch.setColor(Color.WHITE); }
-        }
+        if (fundoTex != null) batch.draw(fundoTex, 0, 0, 1200, 1200);
+
         for (FoodDrop food : comidas) if (foodTex != null) batch.draw(foodTex, food.rect.x, food.rect.y, food.rect.width, food.rect.height);
+        for (ItemDrop d : dropsO2) if (o2Tex != null) batch.draw(o2Tex, d.rect.x, d.rect.y, d.rect.width, d.rect.height);
+        for (Enemy m : minions) if (m.ativo && alienTex != null) batch.draw(alienTex, m.rect.x, m.rect.y, m.rect.width, m.rect.height);
         if (boss.ativo && bossTex != null) batch.draw(bossTex, boss.rect.x, boss.rect.y, boss.rect.width, boss.rect.height);
-        for (SlashWave shot : tirosJogador) if (shot.active && rockTex != null) batch.draw(rockTex, shot.rect.x, shot.rect.y, 16, 16, 32, 32, 0.75f, 0.75f, shot.angle, 0, 0, rockTex.getWidth(), rockTex.getHeight(), false, false);
-        for (SlashWave rock : pedrasBoss) if (rock.active && rockTex != null) batch.draw(rockTex, rock.rect.x, rock.rect.y, 16, 16, 32, 32, 1.2f, 1.2f, rock.angle, 0, 0, rockTex.getWidth(), rockTex.getHeight(), false, false);
-        if (playerTex != null) batch.draw(playerTex, player.x, player.y, player.width, player.height);
+
+        for (SlashWave s : slashesJogador) if (s.active && slashTex != null) batch.draw(slashTex, s.rect.x, s.rect.y, 24, 24, 48, 48, 1f, 1f, s.angle, 0, 0, slashTex.getWidth(), slashTex.getHeight(), false, false);
+        for (SlashWave p : pedrasBoss) if (p.active && rochaTex != null) batch.draw(rochaTex, p.rect.x, p.rect.y, 32, 32, 64, 64, 1.3f, 1.3f, p.angle, 0, 0, rochaTex.getWidth(), rochaTex.getHeight(), false, false);
+        for (SlashWave t : tirosMinions) if (t.active && slashTex != null) batch.draw(slashTex, t.rect.x, t.rect.y, 16, 16, 32, 32, 0.8f, 0.8f, t.angle, 0, 0, slashTex.getWidth(), slashTex.getHeight(), false, false);
+
+        TextureRegion frameAtual = null;
+        if (estadoJogador == 2 && animSlash != null) frameAtual = animSlash.getKeyFrame(stateTime, false);
+        else if (estadoJogador == 1 && animWalk != null) frameAtual = animWalk.getKeyFrame(stateTime, true);
+        else if (animIdle != null) frameAtual = animIdle.getKeyFrame(stateTime, true);
+        if (frameAtual != null) batch.draw(frameAtual, player.x, player.y, player.width, player.height);
         batch.end();
 
-        shape.setProjectionMatrix(camera.combined);
-        shape.begin(ShapeRenderer.ShapeType.Filled);
-        if (boss.ativo && bossTex == null) boss.renderFallback(shape);
-        shape.end();
+        shapeRenderer.setProjectionMatrix(camera.combined);
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        if (boss.ativo && bossTex == null) boss.renderFallback(shapeRenderer);
+        for (Enemy m : minions) {
+            if (m.ativo) {
+                shapeRenderer.setColor(0.8f, 0f, 0f, 1);
+                shapeRenderer.rect(m.rect.x, m.rect.y + m.rect.height + 5, m.rect.width, 5);
+                shapeRenderer.setColor(0f, 0.8f, 0f, 1);
+                shapeRenderer.rect(m.rect.x, m.rect.y + m.rect.height + 5, m.rect.width * Math.max(0, m.hp / (float) m.maxHp), 5);
+            }
+        }
+        shapeRenderer.end();
 
         desenharHUD();
+        desenharFade(delta);
+
+        if (saveData.inventario != null && saveData.inventario.aberto) {
+            saveData.inventario.render(batch, font, batch.getProjectionMatrix(), saveData);
+        }
+
+        CrosshairUtil.desenharMira(shapeRenderer);
     }
 
     private void update(float delta) {
-        if (!save.luaMissoesOk) { game.setScreen(new GameScreen(game, save)); return; }
-        if (save.inventario.aberto) {
-            if (Gdx.input.isKeyJustPressed(Input.Keys.I)) save.inventario.aberto = false;
-            if (Gdx.input.isKeyJustPressed(Input.Keys.C)) save.inventario.usarComida(save);
+        if (fadingOut) return;
+
+        if (saveData.inventario != null) {
+            if (Gdx.input.isKeyJustPressed(Input.Keys.I)) saveData.inventario.aberto = !saveData.inventario.aberto;
+            if (saveData.inventario.aberto) {
+                if (Gdx.input.isKeyJustPressed(Input.Keys.C)) saveData.inventario.usarComida(saveData);
+                return;
+            }
+        }
+
+        if (somEnemyTimer > 0f) somEnemyTimer -= delta;
+        if (cooldown > 0f) cooldown -= delta;
+        if (avisoTimer > 0f) avisoTimer -= delta;
+        saveData.o2 -= 0.55f * delta;
+        if (saveData.o2 <= 0) { game.setScreen(new GameOverScreen(game)); return; }
+
+        if (dialog.isOpen()) {
+            if (Gdx.input.isKeyJustPressed(Input.Keys.E) || Gdx.input.isKeyJustPressed(Input.Keys.ENTER)) dialog.next();
             return;
         }
-        if (Gdx.input.isKeyJustPressed(Input.Keys.I)) { save.inventario.aberto = true; return; }
 
-        if (cooldown > 0f) cooldown -= delta;
-        if (mensagemTimer > 0f) mensagemTimer -= delta;
-        save.o2 -= 0.55f * delta;
-        if (save.o2 <= 0f) { game.setScreen(new GameOverScreen(game)); return; }
+        if (estadoJogador == 2) {
+            slashAnimTimer -= delta;
+            if (slashAnimTimer <= 0) estadoJogador = 0;
+        }
 
+        boolean moving = false;
         float dx = 0f, dy = 0f;
-        if (Gdx.input.isKeyPressed(Input.Keys.A)) dx -= 220f * delta;
-        if (Gdx.input.isKeyPressed(Input.Keys.D)) dx += 220f * delta;
-        if (Gdx.input.isKeyPressed(Input.Keys.W)) dy += 220f * delta;
-        if (Gdx.input.isKeyPressed(Input.Keys.S)) dy -= 220f * delta;
-        WorldCollision.movePlayer(player, dx, dy, pedrasMapa, WORLD_W, WORLD_H);
+        if (Gdx.input.isKeyPressed(Input.Keys.A)) { dx -= 260 * delta; moving = true; }
+        if (Gdx.input.isKeyPressed(Input.Keys.D)) { dx += 260 * delta; moving = true; }
+        if (Gdx.input.isKeyPressed(Input.Keys.W)) { dy += 260 * delta; moving = true; }
+        if (Gdx.input.isKeyPressed(Input.Keys.S)) { dy -= 260 * delta; moving = true; }
+        WorldCollision.movePlayer(player, dx, dy, new Array<>(), 1200f, 1200f);
+        stateTime += delta;
+
+        if (estadoJogador != 2) {
+            if (moving) {
+                estadoJogador = 1;
+                timerPasso -= delta;
+                if (timerPasso <= 0) {
+                    SoundManager.playSound(MathUtils.randomBoolean() ? "footstep1" : "footstep2");
+                    timerPasso = 0.35f;
+                }
+            } else {
+                estadoJogador = 0;
+                timerPasso = 0f;
+            }
+        }
+
+        player.x = MathUtils.clamp(player.x, 0, 1200 - player.width);
+        player.y = MathUtils.clamp(player.y, 0, 1200 - player.height);
+        camera.position.set(player.x, player.y, 0);
+
+        for (int i = dropsO2.size - 1; i >= 0; i--) {
+            ItemDrop d = dropsO2.get(i);
+            if (player.overlaps(d.rect)) {
+                saveData.o2 = Math.min(100, saveData.o2 + 20);
+                SoundManager.playSound("pickup");
+                mensagemAviso = "+20 O2 COLETADO!"; avisoTimer = 1.5f;
+                dropsO2.removeIndex(i);
+            }
+        }
 
         for (int i = comidas.size - 1; i >= 0; i--) {
-            if (player.overlaps(comidas.get(i).rect)) { save.inventario.add("COMIDA"); comidas.removeIndex(i); mensagem = "+1 COMIDA"; mensagemTimer = 1.5f; }
+            FoodDrop food = comidas.get(i);
+            if (player.overlaps(food.rect)) {
+                saveData.inventario.add("COMIDA");
+                comidas.removeIndex(i);
+                mensagemAviso = "+1 COMIDA! Aperte I e depois C para usar.";
+                avisoTimer = 2f;
+                SoundManager.playSound("pickup");
+            }
+        }
+
+        if (Gdx.input.isKeyJustPressed(Input.Keys.R) && !isReloading && saveData.municao < 25) {
+            isReloading = true; reloadTimer = 1.5f; mensagemAviso = "RECARREGANDO..."; avisoTimer = 1.5f;
+            SoundManager.playSound("reload");
+        }
+        if (isReloading) {
+            reloadTimer -= delta;
+            if (reloadTimer <= 0) { isReloading = false; saveData.municao = 25; mensagemAviso = "MUNICÃO RECARREGADA!"; avisoTimer = 2f; }
+        }
+
+        // Horda de lacaios — mais rara que em Marte/Tita, e o primeiro chefe da jornada.
+        if (boss.ativo) {
+            hordeTimer += delta;
+            if (hordeTimer >= 13f) {
+                hordeTimer = 0f;
+                mensagemAviso = "O GUARDIAO CHAMOU REFORCOS!";
+                avisoTimer = 2.5f;
+                minions.add(new Enemy(boss.rect.x + 60, boss.rect.y, 0));
+                if (somEnemyTimer <= 0) { SoundManager.playSound("enemy"); somEnemyTimer = 25f; }
+            }
+        }
+
+        for (int i = minions.size - 1; i >= 0; i--) {
+            Enemy m = minions.get(i);
+            if (m.ativo) {
+                m.update(delta, new Vector2(player.x, player.y));
+                if (m.rect.overlaps(player)) UpgradeSystem.aplicarDano(saveData, 8f * delta);
+            } else {
+                minions.removeIndex(i);
+            }
         }
 
         boss.update(delta, new Vector2(player.x, player.y));
-        if (boss.rect.overlaps(player)) UpgradeSystem.aplicarDano(save, boss.getContactDamage() * delta);
+        if (boss.ativo && boss.rect.overlaps(player)) UpgradeSystem.aplicarDano(saveData, boss.getContactDamage() * delta);
         if (boss.consumeRockThrow()) {
             pedrasBoss.add(new SlashWave(boss.rect.x + boss.rect.width / 2f, boss.rect.y + boss.rect.height / 2f, boss.getRockTarget().x, boss.getRockTarget().y));
         }
 
-        if ((Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) || Gdx.input.isKeyJustPressed(Input.Keys.SPACE)) && cooldown <= 0f && save.inventario.municao > 0 && boss.ativo) {
-            cooldown = Math.max(0.14f, 0.25f - 0.02f * save.inventario.nivelArma);
-            save.inventario.municao--;
-            save.municao = save.inventario.municao;
-            Vector3 mouse = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0f);
-            camera.unproject(mouse);
-            SlashWave shot = new SlashWave(player.x, player.y, mouse.x, mouse.y);
-            tirosJogador.add(shot);
+        if ((Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) || Gdx.input.isKeyJustPressed(Input.Keys.SPACE)) && saveData.municao > 0 && cooldown <= 0f && !isReloading) {
+            estadoJogador = 2;
+            slashAnimTimer = 0.3f;
+            stateTime = 0f;
+            saveData.municao--; saveData.inventario.municao = saveData.municao; cooldown = Math.max(0.14f, 0.25f - 0.02f * saveData.inventario.nivelArma);
+            SoundManager.playSound("slash");
+
+            Vector3 m = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+            camera.unproject(m);
+            slashesJogador.add(new SlashWave(player.x, player.y, m.x, m.y));
         }
 
-        for (int i = tirosJogador.size - 1; i >= 0; i--) {
-            SlashWave shot = tirosJogador.get(i);
-            shot.update(delta);
-            if (boss.ativo && shot.rect.overlaps(boss.rect)) {
-                boss.levarDano(UpgradeSystem.danoArma(save));
-                shot.active = false;
+        for (int i = slashesJogador.size - 1; i >= 0; i--) {
+            SlashWave s = slashesJogador.get(i); s.update(delta);
+            if (!s.active) { slashesJogador.removeIndex(i); continue; }
+
+            if (boss.ativo && s.rect.overlaps(boss.rect)) {
+                boss.levarDano(UpgradeSystem.danoArma(saveData)); s.active = false;
+                SoundManager.playSound("hit_enemy");
                 if (!boss.ativo) {
-                    save.bossLuaDerrotado = true;
-                    save.inventario.add("CHAVE_LUA");
-                    save.inventario.municao = 25;
-                    save.municao = 25;
-                    save.fase = "MARTE";
-                    save.salvar();
-                    game.setScreen(new MarsScreen(game, save));
-                    return;
+                    saveData.bossLuaDerrotado = true;
+                    saveData.inventario.add("CHAVE_LUA");
+                    saveData.inventario.municao = 25; saveData.municao = 25;
+                    saveData.fase = "MARTE";
+                    saveData.salvar();
+                    fadingOut = true; nextScreen = new MarsScreen(game, saveData);
+                }
+                continue;
+            }
+
+            for (Enemy m : minions) {
+                if (m.ativo && s.rect.overlaps(m.rect)) {
+                    m.hp -= UpgradeSystem.danoArma(saveData); s.active = false;
+                    SoundManager.playSound("hit_enemy");
+                    if (m.hp <= 0) {
+                        m.ativo = false;
+                        if (UpgradeSystem.registerKill(saveData)) { mensagemAviso = saveData.ultimoUpgrade; avisoTimer = 2.5f; }
+                        if (MathUtils.randomBoolean(0.5f)) dropsO2.add(new ItemDrop(m.rect.x, m.rect.y, 0));
+                        if (saveData.inventario != null && MathUtils.randomBoolean(0.3f)) saveData.inventario.add("COMIDA");
+                    }
+                    break;
                 }
             }
-            if (!shot.active) tirosJogador.removeIndex(i);
         }
 
         for (int i = pedrasBoss.size - 1; i >= 0; i--) {
             SlashWave p = pedrasBoss.get(i);
             p.update(delta);
-            if (p.rect.overlaps(player)) { UpgradeSystem.aplicarDano(save, boss.getRockDamage()); p.active = false; }
+            if (p.rect.overlaps(player)) { UpgradeSystem.aplicarDano(saveData, boss.getRockDamage()); p.active = false; }
             if (!p.active) pedrasBoss.removeIndex(i);
+        }
+
+        for (int i = tirosMinions.size - 1; i >= 0; i--) {
+            SlashWave t = tirosMinions.get(i);
+            t.update(delta);
+            if (t.rect.overlaps(player)) { UpgradeSystem.aplicarDano(saveData, 8f); t.active = false; }
+            if (!t.active) tirosMinions.removeIndex(i);
         }
     }
 
     private void desenharHUD() {
-        batch.setProjectionMatrix(camera.combined);
+        batch.getProjectionMatrix().setToOrtho2D(0, 0, 1280, 720);
+        shapeRenderer.setProjectionMatrix(batch.getProjectionMatrix());
+
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        shapeRenderer.setColor(0.05f, 0.05f, 0.05f, 0.8f);
+        shapeRenderer.rect(20, 20, 250, 100);
+        shapeRenderer.setColor(0.1f, 0.5f, 0.8f, 1f);
+        shapeRenderer.rect(30, 30, 230 * (Math.max(0, saveData.o2) / 100f), 15);
+
+        if (boss.ativo) {
+            shapeRenderer.setColor(0.2f, 0.2f, 0.2f, 1f); shapeRenderer.rect(440, 680, 400, 20);
+            shapeRenderer.setColor(0.8f, 0.1f, 0.1f, 1f);
+            shapeRenderer.rect(440, 680, 400 * (boss.hp / (float) boss.maxHp), 20);
+        }
+        shapeRenderer.end();
+
         batch.begin();
-        font.setColor(Color.WHITE);
-        font.draw(batch, "GUARDIAO DA CRATERA — LUA", 24, 575);
-        font.draw(batch, "HP: " + boss.hp + " / " + boss.maxHp, 24, 548);
-        font.draw(batch, "ARMA NV." + save.inventario.nivelArma + "  DANO " + UpgradeSystem.danoArma(save), 24, 520);
-        font.draw(batch, "ARMADURA NV." + save.inventario.nivelArmadura, 24, 495);
-        font.draw(batch, "O2/HP: " + (int)Math.max(0, save.o2), 24, 470);
-        font.draw(batch, "I inventario | C comida | SPACE/CLICK ataca", 24, 28);
-        if (mensagemTimer > 0) font.draw(batch, mensagem, 540, 30);
+        font.setColor(1, 1, 1, 1);
+        font.draw(batch, "O2: " + (int) Math.max(0, saveData.o2), 30, 75);
+        font.draw(batch, "MUNICÃO: " + saveData.municao, 30, 95);
+        font.draw(batch, "PLANETA: LUA — GUARDIAO", 30, 115);
+        if (boss.ativo) font.draw(batch, "GUARDIAO DA LUA", 600, 695);
+        if (isReloading) font.draw(batch, "RECARREGANDO...", 130, 95);
+        if (avisoTimer > 0) font.draw(batch, mensagemAviso, 550, 100);
         batch.end();
-        if (save.inventario.aberto) save.inventario.render(batch, font, camera.combined, save);
+
+        dialog.render(batch, shapeRenderer, font);
     }
 
-    @Override public void show() {}
-    @Override public void resize(int width, int height) { camera.update(); }
-    @Override public void pause() {}
-    @Override public void resume() {}
-    @Override public void hide() {}
-    @Override public void dispose() { batch.dispose(); shape.dispose(); font.dispose(); if (fundoTex != null) fundoTex.dispose(); if (bossTex != null) bossTex.dispose(); if (rockTex != null) rockTex.dispose(); if (foodTex != null) foodTex.dispose(); }
+    private void desenharFade(float delta) {
+        if (fadeAlpha > 0 || fadingOut) {
+            if (fadingOut) fadeAlpha = Math.min(1.0f, fadeAlpha + delta * 2f);
+            else fadeAlpha = Math.max(0.0f, fadeAlpha - delta * 2f);
+
+            Gdx.gl.glEnable(GL20.GL_BLEND);
+            shapeRenderer.getProjectionMatrix().setToOrtho2D(0, 0, 1280, 720);
+            shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+            shapeRenderer.setColor(0, 0, 0, fadeAlpha);
+            shapeRenderer.rect(0, 0, 1280, 720);
+            shapeRenderer.end();
+            Gdx.gl.glDisable(GL20.GL_BLEND);
+
+            if (fadingOut && fadeAlpha >= 1.0f && nextScreen != null) {
+                game.setScreen(nextScreen);
+            }
+        }
+    }
+
+    @Override public void show() {} @Override public void resize(int w, int h) {}
+    @Override public void pause() {} @Override public void resume() {}
+    @Override public void hide() { SoundManager.stopMusic(); }
+    @Override public void dispose() { batch.dispose(); shapeRenderer.dispose(); font.dispose(); }
 }

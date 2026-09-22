@@ -6,11 +6,11 @@ import com.modulo06.echoesmoon.systems.GameSaveData;
 
 /**
  * Tela de morte agora funciona como uma cutscene.
- * Coloque assets/video/earthdestroyed.webm no projeto.
+ * O arquivo real em assets/video e earthdestroyed.mp4 (nao .webm).
  */
 public class GameOverScreen extends VideoCutsceneScreen {
     public GameOverScreen(Game game) {
-        super(game, "video/earthdestroyed.webm", new GameOverFallbackScreen(game), false);
+        super(game, "video/earthdestroyed.mp4", new GameOverFallbackScreen(game), false);
     }
 
     /** Mantem a opcao de voltar ao menu/carregar o save caso o video falhe. */

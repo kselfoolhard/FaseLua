@@ -1,28 +1,39 @@
 package com.modulo06.echoesmoon.systems;
 
-/** Regras da rota alternativa de final. */
+/**
+ * Regras da rota alternativa de final.
+ *
+ * Antes exigia uma grindagem extrema (100 abates + arma/armadura no maximo).
+ * Agora a rota estranha e ativada encontrando as 4 bancadas escondidas
+ * (disfarcadas de gelo, sprite ice.png) espalhadas pelos mapas de Lua, Marte,
+ * Tita e Calisto. Sao bem sutis: o jogador precisa clicar nelas para revelar
+ * o segredo.
+ */
 public final class RouteSystem {
-    /**
-     * A rota exige uma progressao claramente acima do normal.
-     * 100 abates + arma e armadura no nivel maximo.
-     */
-    public static final int KILLS_THRESHOLD = 100;
+    /** Quantas bancadas escondidas existem no total (uma por mundo). */
+    public static final int TOTAL_SEGREDOS = 4;
 
     private RouteSystem() {}
 
-    public static boolean isExtremelyStrong(GameSaveData save) {
-        if (save == null || save.inventario == null) return false;
-
-        return save.inimigosDerrotados >= KILLS_THRESHOLD
-                && save.inventario.nivelArma >= UpgradeSystem.MAX_LEVEL
-                && save.inventario.nivelArmadura >= UpgradeSystem.MAX_LEVEL;
+    public static int segredosEncontrados(GameSaveData save) {
+        if (save == null) return 0;
+        int total = 0;
+        if (save.segredoLuaEncontrado) total++;
+        if (save.segredoMarteEncontrado) total++;
+        if (save.segredoTitaEncontrado) total++;
+        if (save.segredoCalistoEncontrado) total++;
+        return total;
     }
 
-    /** Ativa a rota quando o jogador chega ao requisito. */
+    public static boolean todosSegredosEncontrados(GameSaveData save) {
+        return segredosEncontrados(save) >= TOTAL_SEGREDOS;
+    }
+
+    /** Ativa a rota quando todas as bancadas escondidas foram encontradas. */
     public static boolean tryActivate(GameSaveData save) {
         if (save == null) return false;
         if (save.rotaEstranha) return true;
-        if (!isExtremelyStrong(save)) return false;
+        if (!todosSegredosEncontrados(save)) return false;
 
         save.rotaEstranha = true;
         save.salvar();

@@ -88,7 +88,7 @@ public class AharinScreen implements Screen {
             endingStarted = true;
             if (save.rotaEstranha) {
                 game.setScreen(new VideoCutsceneScreen(
-                        game, "video/weirdending.webm", new MenuScreen(game), false));
+                        game, "video/weirdending.mp4", new MenuScreen(game), false));
             } else {
                 game.setScreen(new VideoCutsceneScreen(
                         game, "video/goodending.webm", new MenuScreen(game), false));

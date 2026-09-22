@@ -25,8 +25,13 @@ public class GameSaveData {
     public boolean bossTitaDerrotado = false;
     public boolean bossCalistoDerrotado = false;
 
-    // Final alternativo desbloqueado por uma progressao extrema.
+    // Final alternativo: ativado ao encontrar as bancadas escondidas (disfarcadas de
+    // gelo, sprite ice.png) espalhadas pelos mapas. Uma por mundo.
     public boolean rotaEstranha = false;
+    public boolean segredoLuaEncontrado = false;
+    public boolean segredoMarteEncontrado = false;
+    public boolean segredoTitaEncontrado = false;
+    public boolean segredoCalistoEncontrado = false;
 
     // Progressao de upgrades.
     public int inimigosDerrotados = 0;
@@ -77,6 +82,10 @@ public class GameSaveData {
         prefs.putBoolean("bossTitaDerrotado", bossTitaDerrotado);
         prefs.putBoolean("bossCalistoDerrotado", bossCalistoDerrotado);
         prefs.putBoolean("rotaEstranha", rotaEstranha);
+        prefs.putBoolean("segredoLuaEncontrado", segredoLuaEncontrado);
+        prefs.putBoolean("segredoMarteEncontrado", segredoMarteEncontrado);
+        prefs.putBoolean("segredoTitaEncontrado", segredoTitaEncontrado);
+        prefs.putBoolean("segredoCalistoEncontrado", segredoCalistoEncontrado);
         prefs.putInteger("inimigosDerrotados", inimigosDerrotados);
         prefs.putString("ultimoUpgrade", ultimoUpgrade);
         prefs.flush();
@@ -116,6 +125,10 @@ public class GameSaveData {
         data.bossTitaDerrotado = prefs.getBoolean("bossTitaDerrotado", false);
         data.bossCalistoDerrotado = prefs.getBoolean("bossCalistoDerrotado", false);
         data.rotaEstranha = prefs.getBoolean("rotaEstranha", false);
+        data.segredoLuaEncontrado = prefs.getBoolean("segredoLuaEncontrado", false);
+        data.segredoMarteEncontrado = prefs.getBoolean("segredoMarteEncontrado", false);
+        data.segredoTitaEncontrado = prefs.getBoolean("segredoTitaEncontrado", false);
+        data.segredoCalistoEncontrado = prefs.getBoolean("segredoCalistoEncontrado", false);
         data.inimigosDerrotados = prefs.getInteger("inimigosDerrotados", 0);
         data.ultimoUpgrade = prefs.getString("ultimoUpgrade", "");
         data.sincronizarInventario();

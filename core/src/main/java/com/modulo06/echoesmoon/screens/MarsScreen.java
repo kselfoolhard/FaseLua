@@ -22,8 +22,10 @@ import com.modulo06.echoesmoon.entities.FoodDrop;
 import com.modulo06.echoesmoon.entities.WorldRock;
 import com.modulo06.echoesmoon.entities.ItemDrop;
 import com.modulo06.echoesmoon.entities.SlashWave;
+import com.modulo06.echoesmoon.systems.CrosshairUtil;
 import com.modulo06.echoesmoon.systems.DialogSystem;
 import com.modulo06.echoesmoon.systems.GameSaveData;
+import com.modulo06.echoesmoon.systems.SegredoSystem;
 import com.modulo06.echoesmoon.systems.SoundManager;
 import com.modulo06.echoesmoon.systems.UpgradeSystem;
 import com.modulo06.echoesmoon.systems.WorldCollision;
@@ -37,6 +39,7 @@ public class MarsScreen implements Screen {
     private BitmapFont font;
 
     private Rectangle player, npcRadio, portalTita;
+    private Rectangle segredoMarte;
     private Array<Enemy> enemies;
     private Array<SlashWave> slashes;
     private Array<SlashWave> tirosInimigos;
@@ -45,7 +48,7 @@ public class MarsScreen implements Screen {
     private Array<WorldRock> pedras;
     private DialogSystem dialog;
 
-    private Texture fundoTex, slashTex, alienTex, radioTex, portraitRadio, portalTitaTex, o2Tex, foodTex, rockTex;
+    private Texture fundoTex, slashTex, alienTex, radioTex, portraitRadio, portalTitaTex, o2Tex, foodTex, iceTex;
 
     private Animation<TextureRegion> animIdle, animWalk, animSlash;
     private int estadoJogador = 0;
@@ -82,6 +85,8 @@ public class MarsScreen implements Screen {
         player = new Rectangle(400, 300, 32, 48);
         npcRadio = new Rectangle(200, 200, 64, 64);
         portalTita = new Rectangle(1000, 500, 100, 100);
+        // Bancada escondida (disfarcada de gelo) da rota estranha.
+        segredoMarte = new Rectangle(80, 1120, 40, 40);
 
         enemies = new Array<>();
         slashes = new Array<>();
@@ -105,7 +110,7 @@ public class MarsScreen implements Screen {
         portalTitaTex = safeLoad("portal_tita.png");
         o2Tex = safeLoad("o2.png");
         foodTex = safeLoad("food.png");
-        rockTex = safeLoad("pedra.png");
+        iceTex = safeLoad("ice.png");
 
         Texture idleTex = safeLoad("player_lunar.png");
         Texture walkTex = safeLoad("player_lunar_walk.png");
@@ -121,7 +126,8 @@ public class MarsScreen implements Screen {
         Array<Rectangle> forbidden = new Array<>();
         forbidden.add(npcRadio);
         forbidden.add(portalTita);
-        WorldRock.spawnMany(pedras, 30, 1200f, 1200f, player, forbidden, 180f);
+        // As pedras do mapa foram removidas: a colisao delas estava ruim e atrapalhava
+        // a movimentacao. O array "pedras" fica vazio de proposito.
         for (int i = 0; i < 11; i++) {
             float x = MathUtils.random(80f, 1120f);
             float y = MathUtils.random(80f, 1120f);
@@ -153,12 +159,10 @@ public class MarsScreen implements Screen {
             font.draw(batch, "PORTAL TITA", portalTita.x + 10, portalTita.y + 120);
         }
 
-        for (WorldRock rock : pedras) {
-            if (rockTex != null) {
-                batch.setColor(0.68f, 0.46f, 0.38f, 1f);
-                batch.draw(rockTex, rock.rect.x, rock.rect.y, rock.rect.width, rock.rect.height);
-                batch.setColor(1f, 1f, 1f, 1f);
-            }
+        if (iceTex != null && !saveData.segredoMarteEncontrado) {
+            batch.setColor(1f, 1f, 1f, 0.22f);
+            batch.draw(iceTex, segredoMarte.x, segredoMarte.y, segredoMarte.width, segredoMarte.height);
+            batch.setColor(1f, 1f, 1f, 1f);
         }
         for (FoodDrop food : comidas) if (foodTex != null) batch.draw(foodTex, food.rect.x, food.rect.y, food.rect.width, food.rect.height);
         for (ItemDrop d : dropsO2) if (o2Tex != null) batch.draw(o2Tex, d.rect.x, d.rect.y, d.rect.width, d.rect.height);
@@ -203,6 +207,8 @@ public class MarsScreen implements Screen {
         if (saveData.inventario != null && saveData.inventario.aberto) {
             saveData.inventario.render(batch, font, batch.getProjectionMatrix(), saveData);
         }
+
+        CrosshairUtil.desenharMira(shapeRenderer);
     }
 
     private void update(float delta) {
@@ -241,6 +247,16 @@ public class MarsScreen implements Screen {
         if (Gdx.input.isKeyJustPressed(Input.Keys.F5)) {
             saveData.fase = "MARTE"; saveData.salvar();
             mensagemAviso = "CHECKPOINT SALVO EM MARTE!"; avisoTimer = 2.0f;
+        }
+
+        if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && !saveData.segredoMarteEncontrado) {
+            Vector3 cliqueMundo = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+            camera.unproject(cliqueMundo);
+            if (SegredoSystem.checarClique(saveData, SegredoSystem.MARTE, segredoMarte, cliqueMundo.x, cliqueMundo.y)) {
+                mensagemAviso = "Voce sentiu algo estranho sob o gelo...";
+                avisoTimer = 2.5f;
+                SoundManager.playSound("pickup");
+            }
         }
 
         for (int i = comidas.size - 1; i >= 0; i--) {
