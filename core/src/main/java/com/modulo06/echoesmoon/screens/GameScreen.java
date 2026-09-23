@@ -28,6 +28,7 @@ import com.modulo06.echoesmoon.systems.SegredoSystem;
 import com.modulo06.echoesmoon.systems.SoundManager;
 import com.modulo06.echoesmoon.systems.UpgradeSystem;
 import com.modulo06.echoesmoon.systems.WorldCollision;
+import com.modulo06.echoesmoon.systems.RecoverySystems;
 
 public class GameScreen implements Screen {
     private Game game;
@@ -66,6 +67,12 @@ public class GameScreen implements Screen {
     private boolean caixasSpawnadas = false;
     private boolean armaCraftada = false;
     private boolean isReloading = false;
+    private boolean mostrarQuestLog = false;
+    private boolean mostrarCraft = false;
+    private boolean mostrarCodex = false;
+    private boolean mostrarMapa = false;
+    private boolean tempestade = false;
+    private final RecoverySystems.Drone drone = new RecoverySystems.Drone();
 
     private int caixasColetadas = 0;
     private final int CAIXAS_NECESSARIAS = 3;
@@ -95,6 +102,11 @@ public class GameScreen implements Screen {
         segredoLua = new Rectangle(1120, 60, 40, 40);
 
         this.saveData.sincronizarInventario();
+        saveData.codex.visitar("LUA");
+        if (!saveData.receitaCraftada && saveData.inventario.gelo == 0) saveData.inventario.add("GELO");
+        if (!saveData.receitaCraftada && saveData.inventario.peca == 0) saveData.inventario.add("PECA");
+        if (saveData.inventario.drone == 0) saveData.inventario.add("DRONE");
+        drone.ativo = saveData.droneAtivo;
         this.armaCraftada = this.saveData.inventario.temArma;
         this.falouOficial = this.saveData.luaMissoesOk;
         slashes = new Array<>();
@@ -208,6 +220,8 @@ public class GameScreen implements Screen {
         }
 
         if (player.overlaps(portalParaMarte)) font.draw(batch, armaCraftada ? "[E] IR PARA A CRATERA" : "PORTAL BLOQUEADO (REQUER SLASHWAVE)", portalParaMarte.x - 20, portalParaMarte.y - 20);
+        if (mostrarCraft) font.draw(batch, "RECEITA: GELO + PECA = FILTRO_O2", 380, 610);
+        if (drone.ativo) font.draw(batch, "DRONE ONLINE", player.x - 15, player.y + 70);
 
         batch.end();
 
@@ -264,6 +278,8 @@ public class GameScreen implements Screen {
         batch.begin();
         font.setColor(1, 1, 1, 1);
         font.draw(batch, "O2: " + (int)Math.max(0, saveData.o2), 30, 75);
+        font.draw(batch, "ESCUDO: " + (int)saveData.escudo + "/" + (int)saveData.escudoMax, 30, 55);
+        font.draw(batch, tempestade ? "TEMPESTADE" : "CEU LIMPO", 30, 35);
         font.draw(batch, "MUNICÃO: " + (armaCraftada ? saveData.municao : "N/A"), 30, 95);
         font.draw(batch, "PLANETA: LUA", 30, 115);
 
@@ -277,7 +293,20 @@ public class GameScreen implements Screen {
             else font.draw(batch, "- Entre no portal da cratera para enfrentar o Guardiao da Lua.", 40, 650);
         }
 
-        font.draw(batch, "[TAB] Ocultar Quest | [I] Inventario | [F5] Salvar Checkpoint | [R] Recarregar", 20, 715);
+        font.draw(batch, "[TAB] Quest | [Q] Log 3 | [I] Inventario | [C] Drone | [F5] Salvar Slot " + saveData.slotId + " | [R] Recarregar", 20, 715);
+        if (mostrarQuestLog) {
+            font.draw(batch, "QUEST LOG", 430, 680);
+            int y = 650;
+            for (RecoverySystems.Quest q : saveData.questLog.quests) { font.draw(batch, q.titulo + " — " + (q.feita ? "FEITA" : "ABERTA"), 430, y); y -= 28; }
+        }
+        if (mostrarCodex) {
+            font.draw(batch, "CODEX", 720, 680);
+            font.draw(batch, "LUA: " + saveData.codex.texto("LUA"), 720, 650);
+            font.draw(batch, "MARTE: " + saveData.codex.texto("MARTE"), 720, 620);
+            font.draw(batch, "TITA: " + saveData.codex.texto("TITA"), 720, 590);
+            font.draw(batch, "CALISTO: " + saveData.codex.texto("CALISTO"), 720, 560);
+        }
+        if (mostrarMapa) font.draw(batch, "MAPA: [F] MARTE " + (saveData.inventario.chaveMarte ? "LIBERADO" : "BLOQUEADO"), 720, 520);
         if (avisoTimer > 0) font.draw(batch, mensagemAviso, 550, 100);
         batch.end();
 
@@ -319,16 +348,38 @@ public class GameScreen implements Screen {
             }
         }
 
+        if (Gdx.input.isKeyJustPressed(Input.Keys.Q)) mostrarQuestLog = !mostrarQuestLog;
+        if (Gdx.input.isKeyJustPressed(Input.Keys.L)) mostrarCodex = !mostrarCodex;
+        if (Gdx.input.isKeyJustPressed(Input.Keys.M)) mostrarMapa = !mostrarMapa;
+        if (mostrarMapa && Gdx.input.isKeyJustPressed(Input.Keys.F) && saveData.inventario.chaveMarte) {
+            saveData.fase = "MARTE"; saveData.salvar(); game.setScreen(new MarsScreen(game, saveData)); return;
+        }
+        if (Gdx.input.isKeyJustPressed(Input.Keys.C) && saveData.inventario.drone > 0) {
+            drone.ativo = !drone.ativo; saveData.droneAtivo = drone.ativo; saveData.salvar();
+        }
+
         if (somEnemyTimer > 0f) somEnemyTimer -= delta;
         if (cooldown > 0f) cooldown -= delta;
         if (avisoTimer > 0f) avisoTimer -= delta;
 
-        if (player.overlaps(safeZone)) saveData.o2 = Math.min(100f, saveData.o2 + 15f * delta);
-        else saveData.o2 -= 0.5f * delta;
+        saveData.cicloTempestade += delta;
+        if (saveData.cicloTempestade >= 20f) saveData.cicloTempestade = 0f;
+        tempestade = saveData.cicloTempestade >= 12f;
+        if (player.overlaps(safeZone)) {
+            saveData.o2 = Math.min(100f, saveData.o2 + 15f * delta);
+            if (Gdx.input.isKeyPressed(Input.Keys.E)) saveData.escudo = saveData.escudoMax;
+        }
+        else saveData.o2 -= (tempestade ? 4.0f : 0.5f) * delta;
+        if (drone.ativo) drone.update(delta, player.x, player.y, false);
 
         if (saveData.o2 <= 0) game.setScreen(new GameOverScreen(game));
 
         if (dialog.isOpen()) {
+            if (dialog.aguardandoEscolha()) {
+                if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_1)) { saveData.rotaA = true; dialog.escolher(); saveData.inventario.add("COMIDA"); falouOficial = true; gerarCaixasEInimigos(); caixasSpawnadas = true; saveData.salvar(); }
+                if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_2)) { saveData.rotaB = true; dialog.escolher(); falouOficial = true; gerarCaixasEInimigos(); caixasSpawnadas = true; saveData.salvar(); }
+                return;
+            }
             if (Gdx.input.isKeyJustPressed(Input.Keys.E) || Gdx.input.isKeyJustPressed(Input.Keys.ENTER)) {
                 dialog.next();
                 if (!dialog.isOpen() && player.overlaps(npcLua)) {
@@ -356,13 +407,8 @@ public class GameScreen implements Screen {
             mensagemAviso = "CHECKPOINT SALVO NA LUA!"; avisoTimer = 2.0f;
         }
 
-        if (player.overlaps(npcLua) && Gdx.input.isKeyJustPressed(Input.Keys.E)) {
-            dialog.start(new String[]{
-                "Recruta! Os sistemas da base falharam e a area foi invadida.",
-                "Encontre 3 caixas de mantimentos espalhadas pelo setor.",
-                "Traga-as ate a bancada para montar sua arma SlashWave",
-                "Assim poderá ir para marte!"
-            }, portraitOficial);
+        if (player.overlaps(npcLua) && !falouOficial && Gdx.input.isKeyJustPressed(Input.Keys.E)) {
+            dialog.startChoice("Escolha: preservar a colonia ou exigir a rota de fuga?", portraitOficial);
             return;
         }
 
@@ -427,6 +473,13 @@ public class GameScreen implements Screen {
         camera.position.set(player.x, player.y, 0);
 
         if (player.overlaps(zonaInteracao)) {
+            if (Gdx.input.isKeyJustPressed(Input.Keys.E) && !saveData.receitaCraftada) {
+                mostrarCraft = true;
+                if (RecoverySystems.craft(saveData.inventario, "GELO", "PECA", "FILTRO_O2")) {
+                    saveData.receitaCraftada = true; saveData.questLog.complete("GELO"); saveData.salvar();
+                    mensagemAviso = "CRAFT OK: FILTRO_O2!"; avisoTimer = 2.5f;
+                } else { mensagemAviso = "FALTA MATERIAL: GELO + PECA"; avisoTimer = 2.5f; }
+            }
             if (Gdx.input.isKeyPressed(Input.Keys.E)) {
                 if (caixasColetadas >= CAIXAS_NECESSARIAS) {
                     craftingProgress += delta;
@@ -445,7 +498,7 @@ public class GameScreen implements Screen {
         for (Enemy e : enemies) {
             if (e.ativo) {
                 e.update(delta, new com.badlogic.gdx.math.Vector2(player.x, player.y));
-                if (e.rect.overlaps(player)) UpgradeSystem.aplicarDano(saveData, 5f * delta);
+                if (e.rect.overlaps(player)) receberDano(5f * delta);
             }
         }
 
@@ -490,6 +543,12 @@ public class GameScreen implements Screen {
                 mensagemAviso = "COMPLETE AS MISSOES DA LUA E FABRIQUE A ARMA!"; avisoTimer = 2f;
             }
         }
+    }
+
+    private void receberDano(float dano) {
+        float resto = dano - saveData.escudo;
+        saveData.escudo = Math.max(0f, saveData.escudo - dano);
+        if (resto > 0f) UpgradeSystem.aplicarDano(saveData, resto);
     }
 
     @Override public void show() {} @Override public void resize(int w, int h) {}

@@ -36,6 +36,16 @@ public class GameSaveData {
     // Progressao de upgrades.
     public int inimigosDerrotados = 0;
     public String ultimoUpgrade = "";
+    public int slotId = 1;
+    public boolean receitaCraftada = false;
+    public float cicloTempestade = 0f;
+    public boolean droneAtivo = false;
+    public boolean rotaA = false;
+    public boolean rotaB = false;
+    public float escudo = 50f;
+    public float escudoMax = 50f;
+    public RecoverySystems.QuestLog questLog = new RecoverySystems.QuestLog();
+    public RecoverySystems.Codex codex = new RecoverySystems.Codex();
 
     public Inventario inventario = new Inventario();
 
@@ -53,8 +63,13 @@ public class GameSaveData {
     }
 
     public void salvar() {
+        salvar(slotId);
+    }
+
+    public void salvar(int slot) {
+        slotId = slot;
         sincronizarInventario();
-        Preferences prefs = Gdx.app.getPreferences("EchoesMoonPrefs");
+        Preferences prefs = Gdx.app.getPreferences("EchoesMoonPrefs_slot" + slot);
         prefs.putFloat("playerX", playerX);
         prefs.putFloat("playerY", playerY);
         prefs.putString("fase", fase);
@@ -88,11 +103,29 @@ public class GameSaveData {
         prefs.putBoolean("segredoCalistoEncontrado", segredoCalistoEncontrado);
         prefs.putInteger("inimigosDerrotados", inimigosDerrotados);
         prefs.putString("ultimoUpgrade", ultimoUpgrade);
+        prefs.putInteger("slotId", slotId);
+        prefs.putBoolean("receitaCraftada", receitaCraftada);
+        prefs.putFloat("cicloTempestade", cicloTempestade);
+        prefs.putBoolean("droneAtivo", droneAtivo);
+        prefs.putBoolean("rotaA", rotaA);
+        prefs.putBoolean("rotaB", rotaB);
+        prefs.putFloat("escudo", escudo);
+        prefs.putFloat("escudoMax", escudoMax);
+        prefs.putInteger("gelo", inventario.gelo);
+        prefs.putInteger("peca", inventario.peca);
+        prefs.putInteger("filtroO2", inventario.filtroO2);
+        prefs.putInteger("drone", inventario.drone);
+        for (int i = 0; i < questLog.quests.size; i++) prefs.putBoolean("quest_" + i, questLog.quests.get(i).feita);
+        for (String mundo : new String[]{"LUA", "MARTE", "TITA", "CALISTO"}) prefs.putBoolean("codex_" + mundo, codex.aberto(mundo));
         prefs.flush();
     }
 
     public static GameSaveData carregar() {
-        Preferences prefs = Gdx.app.getPreferences("EchoesMoonPrefs");
+        return carregar(1);
+    }
+
+    public static GameSaveData carregar(int slot) {
+        Preferences prefs = Gdx.app.getPreferences("EchoesMoonPrefs_slot" + slot);
         if (!prefs.contains("fase")) return null;
 
         GameSaveData data = new GameSaveData();
@@ -131,13 +164,28 @@ public class GameSaveData {
         data.segredoCalistoEncontrado = prefs.getBoolean("segredoCalistoEncontrado", false);
         data.inimigosDerrotados = prefs.getInteger("inimigosDerrotados", 0);
         data.ultimoUpgrade = prefs.getString("ultimoUpgrade", "");
+        data.slotId = slot;
+        data.receitaCraftada = prefs.getBoolean("receitaCraftada", false);
+        data.cicloTempestade = prefs.getFloat("cicloTempestade", 0f);
+        data.droneAtivo = prefs.getBoolean("droneAtivo", false);
+        data.rotaA = prefs.getBoolean("rotaA", false);
+        data.rotaB = prefs.getBoolean("rotaB", false);
+        data.escudo = prefs.getFloat("escudo", 50f);
+        data.escudoMax = prefs.getFloat("escudoMax", 50f);
+        data.inventario.gelo = prefs.getInteger("gelo", 0);
+        data.inventario.peca = prefs.getInteger("peca", 0);
+        data.inventario.filtroO2 = prefs.getInteger("filtroO2", 0);
+        data.inventario.drone = prefs.getInteger("drone", 0);
+        for (int i = 0; i < data.questLog.quests.size; i++) data.questLog.quests.get(i).feita = prefs.getBoolean("quest_" + i, false);
+        for (String mundo : new String[]{"LUA", "MARTE", "TITA", "CALISTO"}) if (prefs.getBoolean("codex_" + mundo, false)) data.codex.visitar(mundo);
         data.sincronizarInventario();
         return data;
     }
 
     public static void apagar() {
-        Preferences prefs = Gdx.app.getPreferences("EchoesMoonPrefs");
-        prefs.clear();
-        prefs.flush();
+        for (int slot = 1; slot <= 2; slot++) {
+            Preferences prefs = Gdx.app.getPreferences("EchoesMoonPrefs_slot" + slot);
+            prefs.clear(); prefs.flush();
+        }
     }
 }

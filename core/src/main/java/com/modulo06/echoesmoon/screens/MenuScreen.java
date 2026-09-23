@@ -28,19 +28,21 @@ public class MenuScreen implements Screen {
         Gdx.gl.glClearColor(0.1f,0.1f,0.15f,1); Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
         camera.update(); batch.setProjectionMatrix(camera.combined); batch.begin();
         font.draw(batch, "ECHOES MOON SURVIVAL", 310, 420);
-        font.draw(batch, "Pressione [1] para NOVO JOGO", 300, 350);
-        font.draw(batch, "Pressione [2] para CONTINUAR", 300, 310);
-        font.draw(batch, "Pressione [3] para RESETAR SAVE", 300, 270);
+        font.draw(batch, "[1] NOVO JOGO / SLOT 1", 300, 350);
+        font.draw(batch, "[2] CONTINUAR SLOT 1", 300, 310);
+        font.draw(batch, "[4] CONTINUAR SLOT 2", 300, 270);
+        font.draw(batch, "[3] RESETAR OS DOIS SLOTS", 300, 230);
         if (feedbackTimer > 0) font.draw(batch, feedbackMsg, 300, 210);
         batch.end();
 
         if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_1) || Gdx.input.isKeyJustPressed(Input.Keys.ENTER)) {
             GameSaveData novo = new GameSaveData();
-            novo.salvar();
+            novo.slotId = 1;
+            novo.salvar(1);
             game.setScreen(new GameScreen(game, novo));
         }
         if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_2)) {
-            GameSaveData save = GameSaveData.carregar();
+            GameSaveData save = GameSaveData.carregar(1);
             if (save == null) {
                 feedbackMsg = "Nenhum save encontrado!";
                 feedbackTimer = 2f;
@@ -56,6 +58,11 @@ public class MenuScreen implements Screen {
                     default: game.setScreen(new GameScreen(game, save)); break;
                 }
             }
+        }
+        if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_4)) {
+            GameSaveData save = GameSaveData.carregar(2);
+            if (save == null) { feedbackMsg = "Nenhum save no slot 2!"; feedbackTimer = 2f; }
+            else { save.sincronizarInventario(); game.setScreen(new GameScreen(game, save)); }
         }
         if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_3)) {
             GameSaveData.apagar();
