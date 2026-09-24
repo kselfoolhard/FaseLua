@@ -6,11 +6,13 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Cursor;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.utils.Scaling;
 import com.modulo06.echoesmoon.systems.DialogSystem;
 import com.modulo06.echoesmoon.systems.GameSaveData;
@@ -36,12 +38,12 @@ public class AharinScreen implements Screen {
         this.game = game;
         this.save = save;
         fundo = Gdx.files.internal("fundo_aharin.png").exists()
-                ? new Texture("fundo_aharin.png") : null;
+            ? new Texture("fundo_aharin.png") : null;
 
         dialog.start(new String[]{
-                "Voce atravessou quatro mundos por uma pergunta, nao por uma arma.",
-                "A Luz nao se guarda: ela se entrega a quem nao destroi.",
-                "Volte. A Terra ainda pode escolher."
+            "Voce atravessou quatro mundos por uma pergunta, nao por uma arma.",
+            "A Luz nao se guarda: ela se entrega a quem nao destroi.",
+            "Volte. A Terra ainda pode escolher."
         }, null);
     }
 
@@ -71,9 +73,12 @@ public class AharinScreen implements Screen {
 
         if (dialog.isOpen()) {
             if (Gdx.input.isKeyJustPressed(Input.Keys.ENTER)
-                    || Gdx.input.isKeyJustPressed(Input.Keys.E)) {
+                || Gdx.input.isKeyJustPressed(Input.Keys.E)) {
                 dialog.next();
             }
+            Matrix4 hud = new Matrix4().setToOrtho2D(0, 0, 1280, 720);
+            batch.setProjectionMatrix(hud);
+            shape.setProjectionMatrix(hud);
             dialog.render(batch, shape, font);
             return;
         }
@@ -86,13 +91,9 @@ public class AharinScreen implements Screen {
 
         if (!endingStarted) {
             endingStarted = true;
-            if (save.rotaEstranha) {
-                game.setScreen(new VideoCutsceneScreen(
-                        game, "video/weirdending.mp4", new MenuScreen(game), false));
-            } else {
-                game.setScreen(new VideoCutsceneScreen(
-                        game, "video/goodending.webm", new MenuScreen(game), false));
-            }
+            // O encerramento canonico da campanha agora e sempre weirdending.webm.
+            game.setScreen(new VideoCutsceneScreen(
+                game, "video/weirdending.webm", new MenuScreen(game)));
         }
     }
 
@@ -113,7 +114,7 @@ public class AharinScreen implements Screen {
         batch.draw(texture, (800f - size.x) / 2f, (600f - size.y) / 2f, size.x, size.y);
     }
 
-    @Override public void show() {}
+    @Override public void show() { Gdx.graphics.setSystemCursor(Cursor.SystemCursor.None); }
     @Override public void resize(int width, int height) {}
     @Override public void pause() {}
     @Override public void resume() {}

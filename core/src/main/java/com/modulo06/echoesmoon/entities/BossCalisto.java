@@ -6,8 +6,9 @@ import com.modulo06.echoesmoon.systems.Inventario;
 
 public class BossCalisto {
     public int forma = 1;
-    public float hp = 100f;
-    public float hpMax = 100f;
+    public float hp;
+    public float hpMax;
+    private final float baseHp;
     public float speed = 90f;
     public boolean mortoFinal = false;
 
@@ -21,6 +22,16 @@ public class BossCalisto {
     private boolean isDashing = false;
     private float dashDuration = 0.2f;
     private float currentDashTime = 0f;
+
+    public BossCalisto() {
+        this(260f);
+    }
+
+    public BossCalisto(float baseHp) {
+        this.baseHp = Math.max(1f, baseHp);
+        this.hpMax = this.baseHp;
+        this.hp = this.hpMax;
+    }
 
     public void update(float delta, float playerX, float playerY, Inventario inventario) {
         if (mortoFinal) return;
@@ -62,7 +73,7 @@ public class BossCalisto {
         if (hp <= 0) {
             if (forma < 3) {
                 forma++;
-                hpMax = hpMax * 1.5f; // Aumento progressivo de HP
+                hpMax = baseHp * (forma == 2 ? 1.4f : 1.95f); // Forma 2 e 3 mais fortes
                 hp = hpMax;
                 speed *= 1.18f;       // Aumento de velocidade
                 width += 12;          // Aumenta o tamanho visual a cada forma

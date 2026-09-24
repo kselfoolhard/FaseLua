@@ -11,8 +11,8 @@ public class BossMarte {
     public static final int WINDUP = 1;
 
     public final Rectangle rect;
-    public final int maxHp = 160;
-    public int hp = maxHp;
+    public int maxHp;
+    public int hp;
     public final float speed = 125f;
     public boolean ativo = true;
 
@@ -22,7 +22,13 @@ public class BossMarte {
     private final Vector2 rockTarget = new Vector2();
 
     public BossMarte(float x, float y) {
+        this(x, y, 210);
+    }
+
+    public BossMarte(float x, float y, int maxHp) {
         rect = new Rectangle(x, y, 72f, 72f);
+        this.maxHp = Math.max(1, maxHp);
+        this.hp = this.maxHp;
     }
 
     public void update(float delta, Vector2 playerPos) {

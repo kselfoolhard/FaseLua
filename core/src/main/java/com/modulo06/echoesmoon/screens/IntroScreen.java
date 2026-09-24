@@ -5,6 +5,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Cursor;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
@@ -14,7 +15,9 @@ import com.badlogic.gdx.utils.Scaling;
 import com.badlogic.gdx.utils.viewport.FitViewport;
 import com.badlogic.gdx.utils.viewport.Viewport;
 import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.math.MathUtils;
 import com.modulo06.echoesmoon.systems.GameSaveData;
+import com.modulo06.echoesmoon.systems.SoundManager;
 
 /** Intro em viewport virtual 800x600 para nao esticar as artes. */
 public class IntroScreen implements Screen {
@@ -26,6 +29,10 @@ public class IntroScreen implements Screen {
     private final OrthographicCamera camera = new OrthographicCamera();
     private final Viewport viewport = new FitViewport(800, 600, camera);
     private final Texture[] slides = new Texture[3];
+    private Texture luaCutscene;
+    private Texture naveCutscene;
+    private boolean cutsceneAtiva = true;
+    private float cutsceneTempo = 0f;
     private final String[] legendas = {
         "Ano 2142.",
         "A Estacao Lunar Echoes perdeu a comunicacao...",
@@ -42,15 +49,22 @@ public class IntroScreen implements Screen {
         slides[0] = load("intro_1.png");
         slides[1] = load("intro_2.png");
         slides[2] = load("intro_3.png");
+        luaCutscene = load("lua_cutscene.png");
+        naveCutscene = load("nave_cutscene.png");
     }
 
     private Texture load(String path) { return Gdx.files.internal(path).exists() ? new Texture(path) : null; }
 
     @Override public void render(float delta) {
-        tempo += delta;
-        if (!fading && slideAtual < slides.length - 1 && tempo >= 2f) {
-            slideAtual++;
-            tempo = 0f;
+        if (cutsceneAtiva) {
+            cutsceneTempo += delta;
+            if (cutsceneTempo >= 3.5f) { cutsceneAtiva = false; tempo = 0f; }
+        } else {
+            tempo += delta;
+            if (!fading && slideAtual < slides.length - 1 && tempo >= 2f) {
+                slideAtual++;
+                tempo = 0f;
+            }
         }
         if (fading) {
             fadeAlpha = Math.min(1f, fadeAlpha + delta * 2f);
@@ -63,11 +77,26 @@ public class IntroScreen implements Screen {
         viewport.apply();
         batch.setProjectionMatrix(camera.combined);
         batch.begin();
-        if (slides[slideAtual] != null) drawAspectFit(slides[slideAtual]);
-        font.setColor(1,1,1,1); font.getData().setScale(1.25f);
-        font.draw(batch, legendas[slideAtual], 45, 90);
-        font.getData().setScale(1f);
-        font.draw(batch, tempoTotalHint(), 45, 45);
+        if (cutsceneAtiva) {
+            if (slides[0] != null) drawAspectFit(slides[0]);
+            if (luaCutscene != null) batch.draw(luaCutscene, 470, 170, 250, 250);
+            if (naveCutscene != null) {
+                float p = Math.min(1f, cutsceneTempo / 3.5f);
+                float nx = MathUtils.lerp(-80f, 560f, p);
+                float ny = MathUtils.lerp(430f, 290f, p);
+                float scale = MathUtils.lerp(0.75f, 0.5f, p);
+                batch.draw(naveCutscene, nx, ny, naveCutscene.getWidth()*scale, naveCutscene.getHeight()*scale);
+            }
+            font.setColor(1,1,1,1); font.getData().setScale(1.1f);
+            font.draw(batch, "A nave se aproxima da Lua...", 45, 90);
+            font.getData().setScale(1f);
+        } else {
+            if (slides[slideAtual] != null) drawAspectFit(slides[slideAtual]);
+            font.setColor(1,1,1,1); font.getData().setScale(1.25f);
+            font.draw(batch, legendas[slideAtual], 45, 90);
+            font.getData().setScale(1f);
+            font.draw(batch, tempoTotalHint(), 45, 45);
+        }
         batch.end();
 
         if (fadeAlpha > 0f) {
@@ -78,13 +107,13 @@ public class IntroScreen implements Screen {
         }
 
         // So permite pular depois de seis segundos reais, como pede o guia.
-        if (!fading && getElapsedTotal() >= 6f && (Gdx.input.isKeyJustPressed(Input.Keys.ENTER) || Gdx.input.isKeyJustPressed(Input.Keys.SPACE))) {
+        if (!fading && !cutsceneAtiva && getElapsedTotal() >= 6f && (Gdx.input.isKeyJustPressed(Input.Keys.ENTER) || Gdx.input.isKeyJustPressed(Input.Keys.SPACE))) {
             fading = true;
             fadeAlpha = 0f;
         }
     }
 
-    private float getElapsedTotal() { return slideAtual * 2f + tempo; }
+    private float getElapsedTotal() { return 3.5f + slideAtual * 2f + tempo; }
     private String tempoTotalHint() { return getElapsedTotal() < 6f ? "Intro: aguarde 6 segundos..." : "[ENTER] / [SPACE] continuar"; }
 
     private void drawAspectFit(Texture texture) {
@@ -94,10 +123,10 @@ public class IntroScreen implements Screen {
         batch.draw(texture, x, y, size.x, size.y);
     }
 
-    @Override public void show() {}
+    @Override public void show() { Gdx.graphics.setSystemCursor(Cursor.SystemCursor.Arrow); SoundManager.stopMusic(); }
     @Override public void resize(int width, int height) { viewport.update(width, height, true); }
     @Override public void pause() {}
     @Override public void resume() {}
     @Override public void hide() {}
-    @Override public void dispose() { batch.dispose(); font.dispose(); shape.dispose(); for (Texture t : slides) if (t != null) t.dispose(); }
+    @Override public void dispose() { batch.dispose(); font.dispose(); shape.dispose(); for (Texture t : slides) if (t != null) t.dispose(); if (luaCutscene != null) luaCutscene.dispose(); if (naveCutscene != null) naveCutscene.dispose(); }
 }

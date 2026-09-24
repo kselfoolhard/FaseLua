@@ -5,6 +5,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Cursor;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Animation;
@@ -22,12 +23,18 @@ import com.modulo06.echoesmoon.entities.Enemy;
 import com.modulo06.echoesmoon.entities.FoodDrop;
 import com.modulo06.echoesmoon.entities.ItemDrop;
 import com.modulo06.echoesmoon.entities.SlashWave;
+import com.modulo06.echoesmoon.systems.BossBalance;
 import com.modulo06.echoesmoon.systems.CrosshairUtil;
 import com.modulo06.echoesmoon.systems.DialogSystem;
 import com.modulo06.echoesmoon.systems.GameSaveData;
 import com.modulo06.echoesmoon.systems.SoundManager;
 import com.modulo06.echoesmoon.systems.UpgradeSystem;
 import com.modulo06.echoesmoon.systems.WorldCollision;
+import com.modulo06.echoesmoon.systems.PlayerCombat;
+import com.modulo06.echoesmoon.systems.GameHud;
+import com.modulo06.echoesmoon.systems.LoadingOverlay;
+import com.modulo06.echoesmoon.systems.RouteSystem;
+import com.modulo06.echoesmoon.systems.RecoverySystems;
 
 /**
  * Guardiao da Lua — segue o mesmo "sistema de boss" da TitanScreen (camera
@@ -54,16 +61,18 @@ public class BossLuaScreen implements Screen {
     private final Array<ItemDrop> dropsO2 = new Array<>();
     private final Array<FoodDrop> comidas = new Array<>();
 
-    private Texture fundoTex, slashTex, bossTex, rochaTex, portraitBoss, alienTex, o2Tex, foodTex;
+    private Texture fundoTex, slashTex, bossTex, rochaTex, portraitBoss, alienTex, o2Tex, foodTex, corpseTex;
+    private final RecoverySystems.Drone drone = new RecoverySystems.Drone();
 
     private Animation<TextureRegion> animIdle, animWalk, animSlash;
+    private Animation<TextureRegion> animIdleUnarmed, animWalkUnarmed, animPunch;
     private int estadoJogador = 0;
     private float slashAnimTimer = 0f;
     private float timerPasso = 0f;
     private float stateTime = 0f;
     private float somEnemyTimer = 0f;
 
-    private float hordeTimer = 0f, cooldown = 0f, reloadTimer = 0f, avisoTimer = 0f;
+    private float hordeTimer = 0f, cooldown = 0f, reloadTimer = 0f, avisoTimer = 0f, chargeTimer = 0f;
     private String mensagemAviso = "";
     private boolean isReloading = false;
 
@@ -76,13 +85,16 @@ public class BossLuaScreen implements Screen {
         this.saveData = saveData;
         camera.setToOrtho(false, 800, 600);
         saveData.sincronizarInventario();
+        drone.ativo = saveData.droneAtivo;
+        drone.loadSprite();
+        saveData.codex.visitar("LUA");
+        GameHud.reset();
 
-        boss = new BossLua(700, 700);
+        boss = new BossLua(700, 700, BossBalance.hpFor(saveData, 140));
 
         carregarTexturas();
         spawnAmbientObjects();
-        SoundManager.playMusic("boss", true);
-        SoundManager.playSound("bossgrowl");
+                SoundManager.playSound("bossgrowl");
 
         dialog.start(new String[]{
             "Quem ousa pisar na minha cratera...",
@@ -99,14 +111,21 @@ public class BossLuaScreen implements Screen {
         portraitBoss = safeLoad("portrait_boss.png");
         o2Tex = safeLoad("o2.png");
         foodTex = safeLoad("food.png");
+        corpseTex = safeLoad("cadaver.png");
 
         Texture idleTex = safeLoad("player_lunar.png");
         Texture walkTex = safeLoad("player_lunar_walk.png");
         Texture slashTexAnim = safeLoad("player_lunar_slash.png");
+        Texture idleUnarmedTex = safeLoad("player_unarmed.png");
+        Texture walkUnarmedTex = safeLoad("player_unarmed_walk.png");
+        Texture punchTex = safeLoad("player_unarmed_punch.png");
 
-        if (idleTex != null) animIdle = new Animation<>(0.2f, TextureRegion.split(idleTex, idleTex.getWidth() / 4, idleTex.getHeight())[0]);
-        if (walkTex != null) animWalk = new Animation<>(0.12f, TextureRegion.split(walkTex, walkTex.getWidth() / 4, walkTex.getHeight())[0]);
-        if (slashTexAnim != null) animSlash = new Animation<>(0.1f, TextureRegion.split(slashTexAnim, slashTexAnim.getWidth() / 4, slashTexAnim.getHeight())[0]);
+        if (idleTex != null) animIdle = new Animation<>(0.2f, TextureRegion.split(idleTex, Math.max(1, idleTex.getWidth() / 4), idleTex.getHeight())[0]);
+        if (walkTex != null) animWalk = new Animation<>(0.12f, TextureRegion.split(walkTex, Math.max(1, walkTex.getWidth() / 4), walkTex.getHeight())[0]);
+        if (slashTexAnim != null) animSlash = new Animation<>(0.1f, TextureRegion.split(slashTexAnim, Math.max(1, slashTexAnim.getWidth() / 4), slashTexAnim.getHeight())[0]);
+        if (idleUnarmedTex != null) animIdleUnarmed = new Animation<>(0.2f, TextureRegion.split(idleUnarmedTex, Math.max(1, idleUnarmedTex.getWidth() / 4), idleUnarmedTex.getHeight())[0]);
+        if (walkUnarmedTex != null) animWalkUnarmed = new Animation<>(0.12f, TextureRegion.split(walkUnarmedTex, Math.max(1, walkUnarmedTex.getWidth() / 4), walkUnarmedTex.getHeight())[0]);
+        if (punchTex != null) { TextureRegion[][] punchFrames = TextureRegion.split(punchTex, Math.max(1, punchTex.getWidth() / 4), punchTex.getHeight()); animPunch = new Animation<>(0.08f, punchFrames[0][0]); }
     }
 
     private void spawnAmbientObjects() {
@@ -145,11 +164,25 @@ public class BossLuaScreen implements Screen {
         for (SlashWave t : tirosMinions) if (t.active && slashTex != null) batch.draw(slashTex, t.rect.x, t.rect.y, 16, 16, 32, 32, 0.8f, 0.8f, t.angle, 0, 0, slashTex.getWidth(), slashTex.getHeight(), false, false);
 
         TextureRegion frameAtual = null;
-        if (estadoJogador == 2 && animSlash != null) frameAtual = animSlash.getKeyFrame(stateTime, false);
-        else if (estadoJogador == 1 && animWalk != null) frameAtual = animWalk.getKeyFrame(stateTime, true);
-        else if (animIdle != null) frameAtual = animIdle.getKeyFrame(stateTime, true);
-        if (frameAtual != null) batch.draw(frameAtual, player.x, player.y, player.width, player.height);
+        boolean playerArmado = saveData.inventario != null && saveData.inventario.temArma;
+        if (estadoJogador == 2) {
+            if (playerArmado && animSlash != null) frameAtual = animSlash.getKeyFrame(stateTime, false);
+            else if (!playerArmado && animPunch != null) frameAtual = animPunch.getKeyFrame(stateTime, false);
+            else if (!playerArmado && animIdleUnarmed != null) frameAtual = animIdleUnarmed.getKeyFrame(stateTime, true);
+        } else if (estadoJogador == 1) {
+            if (playerArmado && animWalk != null) frameAtual = animWalk.getKeyFrame(stateTime, true);
+            else if (!playerArmado && animWalkUnarmed != null) frameAtual = animWalkUnarmed.getKeyFrame(stateTime, true);
+        } else {
+            if (playerArmado && animIdle != null) frameAtual = animIdle.getKeyFrame(stateTime, true);
+            else if (!playerArmado && animIdleUnarmed != null) frameAtual = animIdleUnarmed.getKeyFrame(stateTime, true);
+        }
+        if (frameAtual != null) { batch.setColor(chargeTimer > 0 ? new com.badlogic.gdx.graphics.Color(1f,1f,1f,0.55f+0.45f*(float)Math.abs(Math.sin(stateTime*18f))) : com.badlogic.gdx.graphics.Color.WHITE); batch.draw(frameAtual, player.x, player.y, player.width, player.height); batch.setColor(com.badlogic.gdx.graphics.Color.WHITE); }
+        if (saveData.cadaverAtivo && corpseTex != null) batch.draw(corpseTex, saveData.cadaverX, saveData.cadaverY, 40, 40);
+        drone.draw(batch);
         batch.end();
+        shapeRenderer.setProjectionMatrix(camera.combined);
+        drone.drawBeam(shapeRenderer);
+        PlayerCombat.drawChargeParticles(shapeRenderer, player, chargeTimer, stateTime);
 
         shapeRenderer.setProjectionMatrix(camera.combined);
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
@@ -168,7 +201,7 @@ public class BossLuaScreen implements Screen {
         desenharFade(delta);
 
         if (saveData.inventario != null && saveData.inventario.aberto) {
-            saveData.inventario.render(batch, font, batch.getProjectionMatrix(), saveData);
+            saveData.inventario.render(batch, shapeRenderer, font, batch.getProjectionMatrix(), saveData);
         }
 
         CrosshairUtil.desenharMira(shapeRenderer);
@@ -184,12 +217,15 @@ public class BossLuaScreen implements Screen {
                 return;
             }
         }
+        if (GameHud.handleInput(saveData)) return;
+        if (Gdx.input.isKeyJustPressed(Input.Keys.C) && saveData.inventario.drone > 0) { drone.ativo = !drone.ativo; saveData.droneAtivo = drone.ativo; saveData.salvar(); }
+        if (saveData.cadaverAtivo && player.overlaps(new Rectangle(saveData.cadaverX, saveData.cadaverY, 50, 50)) && Gdx.input.isKeyJustPressed(Input.Keys.E)) { RecoverySystems.recuperarCadaver(saveData); return; }
 
         if (somEnemyTimer > 0f) somEnemyTimer -= delta;
         if (cooldown > 0f) cooldown -= delta;
         if (avisoTimer > 0f) avisoTimer -= delta;
-        saveData.o2 -= 0.55f * delta;
-        if (saveData.o2 <= 0) { game.setScreen(new GameOverScreen(game)); return; }
+        RecoverySystems.updateOxygen(saveData, delta, 0.55f);
+        if (saveData.vida <= 0) { RecoverySystems.criarCadaver(saveData, player.x, player.y); saveData.fase = "LUA_BOSS"; saveData.salvar(); game.setScreen(new GameOverScreen(game)); return; }
 
         if (dialog.isOpen()) {
             if (Gdx.input.isKeyJustPressed(Input.Keys.E) || Gdx.input.isKeyJustPressed(Input.Keys.ENTER)) dialog.next();
@@ -249,7 +285,7 @@ public class BossLuaScreen implements Screen {
             }
         }
 
-        if (Gdx.input.isKeyJustPressed(Input.Keys.R) && !isReloading && saveData.municao < 25) {
+        if (saveData.inventario.temArma && Gdx.input.isKeyJustPressed(Input.Keys.R) && !isReloading && saveData.municao < 25) {
             isReloading = true; reloadTimer = 1.5f; mensagemAviso = "RECARREGANDO..."; avisoTimer = 1.5f;
             SoundManager.playSound("reload");
         }
@@ -265,7 +301,8 @@ public class BossLuaScreen implements Screen {
                 hordeTimer = 0f;
                 mensagemAviso = "O GUARDIAO CHAMOU REFORCOS!";
                 avisoTimer = 2.5f;
-                minions.add(new Enemy(boss.rect.x + 60, boss.rect.y, 0));
+                int amount = RouteSystem.enemyCount(saveData, 1);
+                for (int i = 0; i < amount; i++) minions.add(new Enemy(boss.rect.x + 60 + i * 38f, boss.rect.y + i * 18f, 0));
                 if (somEnemyTimer <= 0) { SoundManager.playSound("enemy"); somEnemyTimer = 25f; }
             }
         }
@@ -274,29 +311,36 @@ public class BossLuaScreen implements Screen {
             Enemy m = minions.get(i);
             if (m.ativo) {
                 m.update(delta, new Vector2(player.x, player.y));
-                if (m.rect.overlaps(player)) UpgradeSystem.aplicarDano(saveData, 8f * delta);
+                if (m.rect.overlaps(player)) UpgradeSystem.aplicarDano(saveData, (RouteSystem.isAggressive(saveData) ? 10f : 8f) * delta);
             } else {
                 minions.removeIndex(i);
             }
         }
 
         boss.update(delta, new Vector2(player.x, player.y));
+        if (drone.ativo) {
+            boolean disparouDrone = drone.assist(delta, player.x, player.y, saveData, boss.rect.x + boss.rect.width * 0.5f, boss.rect.y + boss.rect.height * 0.5f, boss.ativo);
+            if (disparouDrone && boss.ativo) {
+                boss.levarDano(Math.max(1, Math.round(UpgradeSystem.danoArma(saveData) * 0.45f)));
+                SoundManager.playSound("hit_enemy");
+                if (!boss.ativo) { saveData.bossLuaDerrotado = true; saveData.inventario.add("CHAVE_LUA"); saveData.fase = "MARTE"; saveData.salvar(); fadingOut = true; nextScreen = new MarsScreen(game, saveData); }
+            }
+        }
         if (boss.ativo && boss.rect.overlaps(player)) UpgradeSystem.aplicarDano(saveData, boss.getContactDamage() * delta);
         if (boss.consumeRockThrow()) {
             pedrasBoss.add(new SlashWave(boss.rect.x + boss.rect.width / 2f, boss.rect.y + boss.rect.height / 2f, boss.getRockTarget().x, boss.getRockTarget().y));
         }
 
-        if ((Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) || Gdx.input.isKeyJustPressed(Input.Keys.SPACE)) && saveData.municao > 0 && cooldown <= 0f && !isReloading) {
-            estadoJogador = 2;
-            slashAnimTimer = 0.3f;
-            stateTime = 0f;
-            saveData.municao--; saveData.inventario.municao = saveData.municao; cooldown = Math.max(0.14f, 0.25f - 0.02f * saveData.inventario.nivelArma);
-            SoundManager.playSound("slash");
-
-            Vector3 m = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
-            camera.unproject(m);
-            slashesJogador.add(new SlashWave(player.x, player.y, m.x, m.y));
+        if (!saveData.inventario.temArma && Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && cooldown <= 0f) {
+            socarLua();
+        } else if (saveData.inventario.temArma && Gdx.input.isButtonPressed(Input.Buttons.LEFT) && saveData.municao > 0 && !isReloading) {
+            chargeTimer = Math.min(1.2f, chargeTimer + delta);
+        } else if (saveData.inventario.temArma && chargeTimer >= 0.8f && saveData.municao > 0 && !isReloading) {
+            dispararLua(true); chargeTimer = 0f;
+        } else if (saveData.inventario.temArma && chargeTimer > 0f && saveData.municao > 0 && !isReloading) {
+            dispararLua(false); chargeTimer = 0f;
         }
+        if (saveData.inventario.temArma && Gdx.input.isKeyJustPressed(Input.Keys.SPACE) && saveData.municao > 0 && cooldown <= 0f && !isReloading) dispararLua(false);
 
         for (int i = slashesJogador.size - 1; i >= 0; i--) {
             SlashWave s = slashesJogador.get(i); s.update(delta);
@@ -318,7 +362,7 @@ public class BossLuaScreen implements Screen {
 
             for (Enemy m : minions) {
                 if (m.ativo && s.rect.overlaps(m.rect)) {
-                    m.hp -= UpgradeSystem.danoArma(saveData); s.active = false;
+                    m.hp -= UpgradeSystem.danoArma(saveData); s.active = false; SoundManager.playSound("hit_enemy");
                     SoundManager.playSound("hit_enemy");
                     if (m.hp <= 0) {
                         m.ativo = false;
@@ -346,34 +390,13 @@ public class BossLuaScreen implements Screen {
         }
     }
 
+    private void dispararLua(boolean charged) { estadoJogador=2; slashAnimTimer=.3f; stateTime=0f; saveData.municao--; saveData.inventario.municao=saveData.municao; cooldown=Math.max(.14f,.25f-.02f*saveData.inventario.nivelArma); SoundManager.playSound(charged ? "charged" : "slash"); Vector3 m=new Vector3(Gdx.input.getX(),Gdx.input.getY(),0); camera.unproject(m); slashesJogador.add(new SlashWave(player.x,player.y,m.x,m.y,charged)); }
+
     private void desenharHUD() {
-        batch.getProjectionMatrix().setToOrtho2D(0, 0, 1280, 720);
-        shapeRenderer.setProjectionMatrix(batch.getProjectionMatrix());
-
-        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
-        shapeRenderer.setColor(0.05f, 0.05f, 0.05f, 0.8f);
-        shapeRenderer.rect(20, 20, 250, 100);
-        shapeRenderer.setColor(0.1f, 0.5f, 0.8f, 1f);
-        shapeRenderer.rect(30, 30, 230 * (Math.max(0, saveData.o2) / 100f), 15);
-
-        if (boss.ativo) {
-            shapeRenderer.setColor(0.2f, 0.2f, 0.2f, 1f); shapeRenderer.rect(440, 680, 400, 20);
-            shapeRenderer.setColor(0.8f, 0.1f, 0.1f, 1f);
-            shapeRenderer.rect(440, 680, 400 * (boss.hp / (float) boss.maxHp), 20);
-        }
-        shapeRenderer.end();
-
-        batch.begin();
-        font.setColor(1, 1, 1, 1);
-        font.draw(batch, "O2: " + (int) Math.max(0, saveData.o2), 30, 75);
-        font.draw(batch, "MUNICÃO: " + saveData.municao, 30, 95);
-        font.draw(batch, "PLANETA: LUA — GUARDIAO", 30, 115);
-        if (boss.ativo) font.draw(batch, "GUARDIAO DA LUA", 600, 695);
-        if (isReloading) font.draw(batch, "RECARREGANDO...", 130, 95);
-        if (avisoTimer > 0) font.draw(batch, mensagemAviso, 550, 100);
-        batch.end();
-
-        dialog.render(batch, shapeRenderer, font);
+        GameHud.drawBoss(shapeRenderer, batch, font, saveData, "LUA",
+                avisoTimer > 0 ? mensagemAviso : "", "GUARDIAO DA LUA",
+                boss.hp, boss.maxHp, 1, 1, boss.ativo);
+        if (!GameHud.isLogAberto()) dialog.render(batch, shapeRenderer, font);
     }
 
     private void desenharFade(float delta) {
@@ -388,6 +411,7 @@ public class BossLuaScreen implements Screen {
             shapeRenderer.rect(0, 0, 1280, 720);
             shapeRenderer.end();
             Gdx.gl.glDisable(GL20.GL_BLEND);
+            if (!fadingOut && fadeAlpha > 0f) LoadingOverlay.draw(shapeRenderer, stateTime, fadeAlpha);
 
             if (fadingOut && fadeAlpha >= 1.0f && nextScreen != null) {
                 game.setScreen(nextScreen);
@@ -395,8 +419,15 @@ public class BossLuaScreen implements Screen {
         }
     }
 
-    @Override public void show() {} @Override public void resize(int w, int h) {}
+
+    private void socarLua() {
+        Vector3 m=new Vector3(Gdx.input.getX(),Gdx.input.getY(),0); camera.unproject(m);
+        Rectangle hit=PlayerCombat.punchBox(player,m); estadoJogador=2; slashAnimTimer=.28f; stateTime=0f; cooldown=.28f; SoundManager.playSound("punch");
+        if (boss.ativo && hit.overlaps(boss.rect)) { boss.levarDano(8); SoundManager.playSound("hit_enemy"); if (!boss.ativo) { saveData.bossLuaDerrotado=true; saveData.inventario.add("CHAVE_LUA"); saveData.fase="MARTE"; saveData.salvar(); fadingOut=true; nextScreen=new MarsScreen(game,saveData); } }
+    }
+
+    @Override public void show() { Gdx.graphics.setSystemCursor(Cursor.SystemCursor.None); SoundManager.playMusic("boss", true); } @Override public void resize(int w, int h) {}
     @Override public void pause() {} @Override public void resume() {}
-    @Override public void hide() { SoundManager.stopMusic(); }
-    @Override public void dispose() { batch.dispose(); shapeRenderer.dispose(); font.dispose(); }
+    @Override public void hide() { SoundManager.stopMusic(); GameHud.reset(); }
+    @Override public void dispose() { drone.dispose(); batch.dispose(); shapeRenderer.dispose(); font.dispose(); }
 }

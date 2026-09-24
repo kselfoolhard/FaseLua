@@ -5,6 +5,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Cursor;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Animation;
@@ -22,6 +23,7 @@ import com.modulo06.echoesmoon.entities.FoodDrop;
 import com.modulo06.echoesmoon.entities.WorldRock;
 import com.modulo06.echoesmoon.entities.ItemDrop;
 import com.modulo06.echoesmoon.entities.SlashWave;
+import com.modulo06.echoesmoon.systems.BossBalance;
 import com.modulo06.echoesmoon.systems.CrosshairUtil;
 import com.modulo06.echoesmoon.systems.DialogSystem;
 import com.modulo06.echoesmoon.systems.GameSaveData;
@@ -29,6 +31,11 @@ import com.modulo06.echoesmoon.systems.SegredoSystem;
 import com.modulo06.echoesmoon.systems.SoundManager;
 import com.modulo06.echoesmoon.systems.UpgradeSystem;
 import com.modulo06.echoesmoon.systems.WorldCollision;
+import com.modulo06.echoesmoon.systems.PlayerCombat;
+import com.modulo06.echoesmoon.systems.GameHud;
+import com.modulo06.echoesmoon.systems.LoadingOverlay;
+import com.modulo06.echoesmoon.systems.RouteSystem;
+import com.modulo06.echoesmoon.systems.RecoverySystems;
 
 public class TitanScreen implements Screen {
     private Game game;
@@ -50,16 +57,25 @@ public class TitanScreen implements Screen {
     private Array<WorldRock> pedrasMapa;
     private DialogSystem dialog;
 
-    private Texture fundoTex, slashTex, bossTex, rochaTex, portraitBoss, alienTex, o2Tex, foodTex, iceTex;
+    private Texture fundoTex, slashTex, bossTex, rochaTex, portraitBoss, alienTex, o2Tex, foodTex, iceTex, pedraTex, corpseTex;
+    private final RecoverySystems.Drone drone = new RecoverySystems.Drone();
 
     private Animation<TextureRegion> animIdle, animWalk, animSlash;
+    private Animation<TextureRegion> animIdleUnarmed, animWalkUnarmed, animPunch;
     private int estadoJogador = 0;
     private float slashAnimTimer = 0f;
     private float timerPasso = 0f;
     private float stateTime = 0f;
     private float somEnemyTimer = 0f;
 
+
     private int bossState = 0;
+    private boolean lanternaLigada = false;
+    private boolean bossEscondido = true;
+    private float bossFugaTimer = 0f;
+    private int bossHits = 0;
+    private float danoDesdeTeleporte = 0f;
+    private float chargeTimer = 0f;
     private float bossTimer = 0f, hordeTimer = 0f, cooldown = 0f, reloadTimer = 0f, avisoTimer = 0f;
     private String mensagemAviso = "";
     private boolean isReloading = false;
@@ -84,7 +100,7 @@ public class TitanScreen implements Screen {
         boss = new Enemy(800, 800, 0);
         boss.rect.width = 110;
         boss.rect.height = 110;
-        boss.maxHp = 180;
+        boss.maxHp = BossBalance.hpFor(saveData, 300);
         boss.hp = boss.maxHp;
 
         minions = new Array<>();
@@ -95,10 +111,13 @@ public class TitanScreen implements Screen {
         comidas = new Array<>();
         pedrasMapa = new Array<>();
         saveData.sincronizarInventario();
+        drone.ativo = saveData.droneAtivo;
+        drone.loadSprite();
+        saveData.codex.visitar("TITA");
+        GameHud.reset();
 
         carregarTexturas();
         spawnAmbientObjects();
-        SoundManager.playMusic("boss", true);
         SoundManager.playSound("bossgrowl");
 
         dialog.start(new String[]{
@@ -117,14 +136,22 @@ public class TitanScreen implements Screen {
         o2Tex = safeLoad("o2.png");
         foodTex = safeLoad("food.png");
         iceTex = safeLoad("ice.png");
+        pedraTex = safeLoad("pedra.png");
+        corpseTex = safeLoad("cadaver.png");
 
         Texture idleTex = safeLoad("player_lunar.png");
         Texture walkTex = safeLoad("player_lunar_walk.png");
         Texture slashTexAnim = safeLoad("player_lunar_slash.png");
+        Texture idleUnarmedTex = safeLoad("player_unarmed.png");
+        Texture walkUnarmedTex = safeLoad("player_unarmed_walk.png");
+        Texture punchTex = safeLoad("player_unarmed_punch.png");
 
-        if (idleTex != null) animIdle = new Animation<>(0.2f, TextureRegion.split(idleTex, idleTex.getWidth() / 4, idleTex.getHeight())[0]);
-        if (walkTex != null) animWalk = new Animation<>(0.12f, TextureRegion.split(walkTex, walkTex.getWidth() / 4, walkTex.getHeight())[0]);
-        if (slashTexAnim != null) animSlash = new Animation<>(0.1f, TextureRegion.split(slashTexAnim, slashTexAnim.getWidth() / 4, slashTexAnim.getHeight())[0]);
+        if (idleTex != null) animIdle = new Animation<>(0.2f, TextureRegion.split(idleTex, Math.max(1, idleTex.getWidth() / 4), idleTex.getHeight())[0]);
+        if (walkTex != null) animWalk = new Animation<>(0.12f, TextureRegion.split(walkTex, Math.max(1, walkTex.getWidth() / 4), walkTex.getHeight())[0]);
+        if (slashTexAnim != null) animSlash = new Animation<>(0.1f, TextureRegion.split(slashTexAnim, Math.max(1, slashTexAnim.getWidth() / 4), slashTexAnim.getHeight())[0]);
+        if (idleUnarmedTex != null) animIdleUnarmed = new Animation<>(0.2f, TextureRegion.split(idleUnarmedTex, Math.max(1, idleUnarmedTex.getWidth() / 4), idleUnarmedTex.getHeight())[0]);
+        if (walkUnarmedTex != null) animWalkUnarmed = new Animation<>(0.12f, TextureRegion.split(walkUnarmedTex, Math.max(1, walkUnarmedTex.getWidth() / 4), walkUnarmedTex.getHeight())[0]);
+        if (punchTex != null) { TextureRegion[][] punchFrames = TextureRegion.split(punchTex, Math.max(1, punchTex.getWidth() / 4), punchTex.getHeight()); animPunch = new Animation<>(0.08f, punchFrames[0][0]); }
     }
 
 
@@ -132,8 +159,7 @@ public class TitanScreen implements Screen {
         Array<Rectangle> forbidden = new Array<>();
         forbidden.add(player);
         forbidden.add(boss.rect);
-        // As pedras do mapa foram removidas: a colisao delas estava ruim e atrapalhava
-        // a movimentacao. O array "pedrasMapa" fica vazio de proposito.
+        for (FoodDrop food : comidas) forbidden.add(food.rect);
         for (int i = 0; i < 12; i++) {
             float x = MathUtils.random(70f, 1120f);
             float y = MathUtils.random(70f, 1120f);
@@ -141,6 +167,7 @@ public class TitanScreen implements Screen {
             if (r.overlaps(player) || r.overlaps(boss.rect)) continue;
             comidas.add(new FoodDrop(x, y));
         }
+        WorldRock.spawnMany(pedrasMapa, 20, 1200f, 1200f, player, forbidden, 130f, 303L);
     }
 
     private Texture safeLoad(String path) {
@@ -164,9 +191,11 @@ public class TitanScreen implements Screen {
             batch.draw(iceTex, segredoTita.x, segredoTita.y, segredoTita.width, segredoTita.height);
             batch.setColor(1f, 1f, 1f, 1f);
         }
+        for (WorldRock rock : pedrasMapa) if (pedraTex != null) batch.draw(pedraTex, rock.rect.x, rock.rect.y, rock.rect.width, rock.rect.height);
         for (FoodDrop food : comidas) if (foodTex != null) batch.draw(foodTex, food.rect.x, food.rect.y, food.rect.width, food.rect.height);
         for (ItemDrop d : dropsO2) if (o2Tex != null) batch.draw(o2Tex, d.rect.x, d.rect.y, d.rect.width, d.rect.height);
         for (Enemy m : minions) if (m.ativo && alienTex != null) batch.draw(alienTex, m.rect.x, m.rect.y, m.rect.width, m.rect.height);
+        // O Titã permanece 100% visível durante toda a luta.
         if (boss.ativo) {
             if (bossTex != null) batch.draw(bossTex, boss.rect.x, boss.rect.y, boss.rect.width, boss.rect.height);
         }
@@ -176,12 +205,26 @@ public class TitanScreen implements Screen {
         for (SlashWave t : tirosMinions) if (t.active && slashTex != null) batch.draw(slashTex, t.rect.x, t.rect.y, 16, 16, 32, 32, 0.8f, 0.8f, t.angle, 0, 0, slashTex.getWidth(), slashTex.getHeight(), false, false);
 
         TextureRegion frameAtual = null;
-        if (estadoJogador == 2 && animSlash != null) frameAtual = animSlash.getKeyFrame(stateTime, false);
-        else if (estadoJogador == 1 && animWalk != null) frameAtual = animWalk.getKeyFrame(stateTime, true);
-        else if (animIdle != null) frameAtual = animIdle.getKeyFrame(stateTime, true);
+        boolean playerArmado = saveData.inventario != null && saveData.inventario.temArma;
+        if (estadoJogador == 2) {
+            if (playerArmado && animSlash != null) frameAtual = animSlash.getKeyFrame(stateTime, false);
+            else if (!playerArmado && animPunch != null) frameAtual = animPunch.getKeyFrame(stateTime, false);
+            else if (!playerArmado && animIdleUnarmed != null) frameAtual = animIdleUnarmed.getKeyFrame(stateTime, true);
+        } else if (estadoJogador == 1) {
+            if (playerArmado && animWalk != null) frameAtual = animWalk.getKeyFrame(stateTime, true);
+            else if (!playerArmado && animWalkUnarmed != null) frameAtual = animWalkUnarmed.getKeyFrame(stateTime, true);
+        } else {
+            if (playerArmado && animIdle != null) frameAtual = animIdle.getKeyFrame(stateTime, true);
+            else if (!playerArmado && animIdleUnarmed != null) frameAtual = animIdleUnarmed.getKeyFrame(stateTime, true);
+        }
 
-        if (frameAtual != null) batch.draw(frameAtual, player.x, player.y, player.width, player.height);
+        if (frameAtual != null) { batch.setColor(chargeTimer > 0 ? new com.badlogic.gdx.graphics.Color(1f,1f,1f,0.55f+0.45f*(float)Math.abs(Math.sin(stateTime*18f))) : com.badlogic.gdx.graphics.Color.WHITE); batch.draw(frameAtual, player.x, player.y, player.width, player.height); batch.setColor(com.badlogic.gdx.graphics.Color.WHITE); }
+        drone.draw(batch);
+        if (saveData.cadaverAtivo && corpseTex != null) batch.draw(corpseTex, saveData.cadaverX, saveData.cadaverY, 40, 40);
         batch.end();
+        shapeRenderer.setProjectionMatrix(camera.combined);
+        drone.drawBeam(shapeRenderer);
+        PlayerCombat.drawChargeParticles(shapeRenderer, player, chargeTimer, stateTime);
 
         shapeRenderer.setProjectionMatrix(camera.combined);
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
@@ -200,12 +243,53 @@ public class TitanScreen implements Screen {
         }
         shapeRenderer.end();
 
+        // Tita fica escura, mas nunca completamente preta. A lanterna acompanha a crosshair.
+        shapeRenderer.setProjectionMatrix(camera.combined);
+        Gdx.gl.glEnable(GL20.GL_BLEND);
+        Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
+        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
+        float left = camera.position.x - 400f, bottom = camera.position.y - 300f;
+
+        // Escurecimento global: suficiente para criar clima sem esconder o cenario.
+        shapeRenderer.setColor(0.01f, 0.014f, 0.024f, lanternaLigada ? 0.34f : 0.48f);
+        shapeRenderer.rect(left, bottom, 800f, 600f);
+
+        if (lanternaLigada) {
+            Vector3 mouse = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+            camera.unproject(mouse);
+
+            float cx = player.x + player.width * 0.5f;
+            float cy = player.y + player.height * 0.5f;
+            Vector2 dir = new Vector2(mouse.x - cx, mouse.y - cy);
+            if (dir.isZero()) dir.set(1f, 0f);
+            dir.nor();
+
+            // Feixe acompanha exatamente a direcao da crosshair.
+            Vector2 side = dir.cpy().rotateDeg(90f).scl(105f);
+            float reach = 440f;
+            shapeRenderer.setColor(1f, 0.94f, 0.66f, 0.24f);
+            shapeRenderer.triangle(
+                cx, cy,
+                cx + dir.x * reach + side.x, cy + dir.y * reach + side.y,
+                cx + dir.x * reach - side.x, cy + dir.y * reach - side.y);
+
+            // Halo perto do jogador para ele continuar visivel.
+            shapeRenderer.setColor(1f, 0.98f, 0.82f, 0.20f);
+            shapeRenderer.circle(cx, cy, 92f);
+
+            // Nucleo mais forte perto do ponto para onde a lanterna aponta.
+            shapeRenderer.setColor(1f, 0.98f, 0.86f, 0.12f);
+            shapeRenderer.circle(cx + dir.x * 120f, cy + dir.y * 120f, 86f);
+        }
+        shapeRenderer.end();
+        Gdx.gl.glDisable(GL20.GL_BLEND);
+
         desenharHUD();
         desenharFade(delta);
 
         // --- SISTEMA DE INVENTARIO: RENDERIZA POR CIMA DE TUDO ---
         if (saveData.inventario != null && saveData.inventario.aberto) {
-            saveData.inventario.render(batch, font, batch.getProjectionMatrix(), saveData);
+            saveData.inventario.render(batch, shapeRenderer, font, batch.getProjectionMatrix(), saveData);
         }
 
         CrosshairUtil.desenharMira(shapeRenderer);
@@ -227,11 +311,22 @@ public class TitanScreen implements Screen {
             }
         }
 
+        if (Gdx.input.isKeyJustPressed(Input.Keys.C) && saveData.inventario.drone > 0) { drone.ativo = !drone.ativo; saveData.droneAtivo = drone.ativo; saveData.salvar(); }
+
+        if (Gdx.input.isKeyJustPressed(Input.Keys.F)) {
+            lanternaLigada = !lanternaLigada;
+            mensagemAviso = lanternaLigada ? "LANTERNA LIGADA" : "LANTERNA DESLIGADA";
+            avisoTimer = 1.5f;
+            // A lanterna não esconde mais o Titã. Ela apenas pode causar dano quando mirada nele.
+            bossEscondido = false;
+        }
+
         if (somEnemyTimer > 0f) somEnemyTimer -= delta;
         if (cooldown > 0f) cooldown -= delta;
         if (avisoTimer > 0f) avisoTimer -= delta;
-        saveData.o2 -= 0.8f * delta;
-        if (saveData.o2 <= 0) game.setScreen(new GameOverScreen(game));
+        if (bossFugaTimer > 0f) bossFugaTimer -= delta;
+        RecoverySystems.updateOxygen(saveData, delta, 0.8f);
+        if (saveData.vida <= 0) { RecoverySystems.criarCadaver(saveData, player.x, player.y); saveData.fase = "TITA"; saveData.salvar(); game.setScreen(new GameOverScreen(game)); return; }
 
         if (dialog.isOpen()) {
             if (Gdx.input.isKeyJustPressed(Input.Keys.E) || Gdx.input.isKeyJustPressed(Input.Keys.ENTER)) dialog.next();
@@ -301,7 +396,7 @@ public class TitanScreen implements Screen {
             }
         }
 
-        if (Gdx.input.isKeyJustPressed(Input.Keys.R) && !isReloading && saveData.municao < 25) {
+        if (saveData.inventario.temArma && Gdx.input.isKeyJustPressed(Input.Keys.R) && !isReloading && saveData.municao < 25) {
             isReloading = true; reloadTimer = 1.5f; mensagemAviso = "RECARREGANDO..."; avisoTimer = 1.5f;
             SoundManager.playSound("reload");
         }
@@ -318,10 +413,40 @@ public class TitanScreen implements Screen {
                     tirosMinions.add(new SlashWave(m.rect.x, m.rect.y, player.x, player.y));
                     m.cooldownTiro = 2.5f;
                 }
-                if (m.rect.overlaps(player)) UpgradeSystem.aplicarDano(saveData, 10f * delta);
+                if (m.rect.overlaps(player)) UpgradeSystem.aplicarDano(saveData, (RouteSystem.isAggressive(saveData) ? 13f : 10f) * delta);
             } else {
                 minions.removeIndex(i);
             }
+        }
+
+        // O Titã nunca fica escondido. A lanterna, quando apontada diretamente para ele,
+        // também causa dano continuamente.
+        bossEscondido = false;
+
+        Vector3 mouseLanterna = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+        camera.unproject(mouseLanterna);
+        float cxLanterna = player.x + player.width * 0.5f;
+        float cyLanterna = player.y + player.height * 0.5f;
+        Vector2 lanternaDir = new Vector2(mouseLanterna.x - cxLanterna, mouseLanterna.y - cyLanterna);
+        Vector2 bossDir = new Vector2(
+            boss.rect.x + boss.rect.width * 0.5f - cxLanterna,
+            boss.rect.y + boss.rect.height * 0.5f - cyLanterna);
+        float distanciaLanterna = bossDir.len();
+        float dotLanterna = lanternaDir.isZero() || bossDir.isZero() ? 1f : lanternaDir.cpy().nor().dot(bossDir.cpy().nor());
+
+        if (boss.ativo && lanternaLigada && distanciaLanterna <= 420f && dotLanterna > 0.55f) {
+            // Dano da lanterna: 30 por segundo enquanto estiver mirando no Titã.
+            aplicarDanoBoss(30f * delta);
+        }
+
+        if (boss.ativo && drone.assist(delta, player.x, player.y, saveData,
+            boss.rect.x + boss.rect.width * 0.5f,
+            boss.rect.y + boss.rect.height * 0.5f, true)) {
+            aplicarDanoBoss(Math.max(4f, UpgradeSystem.danoArma(saveData) * 0.45f));
+            SoundManager.playSound("hit_enemy");
+        } else if (drone.ativo) {
+            // Mesmo sem alvo visivel, o drone continua recuperando O2.
+            drone.assist(delta, player.x, player.y, saveData, player.x, player.y, false);
         }
 
         if (boss.ativo) {
@@ -332,8 +457,8 @@ public class TitanScreen implements Screen {
                 hordeTimer = 0f;
                 mensagemAviso = "O CHEFE CONVOCOU UMA HORDA!";
                 avisoTimer = 2.5f;
-                minions.add(new Enemy(boss.rect.x + 60, boss.rect.y, 1));
-                minions.add(new Enemy(boss.rect.x - 60, boss.rect.y, 1));
+                int amount = RouteSystem.enemyCount(saveData, 2);
+                for (int i = 0; i < amount; i++) minions.add(new Enemy(boss.rect.x + 60 + i * 42f, boss.rect.y + (i % 2) * 28f, 1));
                 if (somEnemyTimer <= 0) {
                     SoundManager.playSound("enemy");
                     somEnemyTimer = 25f;
@@ -347,48 +472,36 @@ public class TitanScreen implements Screen {
                     boss.rect.y += dir.nor().y * 240 * delta;
                 }
                 if (bossTimer > 2.5f) { bossState = 1; bossTimer = 0f; }
-            } else if (bossState == 1) {
-                if (bossTimer > 0.8f) {
-                    pedrasBoss.add(new SlashWave(boss.rect.x + boss.rect.width/2, boss.rect.y + boss.rect.height/2, player.x, player.y));
-                    bossState = 0; bossTimer = 0f;
-                }
-            }
+            } else if (bossState == 1) { if (bossTimer > 0.8f) { pedrasBoss.add(new SlashWave(boss.rect.x + boss.rect.width/2, boss.rect.y + boss.rect.height/2, player.x, player.y)); bossState = 0; bossTimer = 0f; } }
             if (boss.rect.overlaps(player)) UpgradeSystem.aplicarDano(saveData, 12f * delta);
         }
 
-        if ((Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) || Gdx.input.isKeyJustPressed(Input.Keys.SPACE)) && saveData.municao > 0 && cooldown <= 0f && !isReloading) {
-            estadoJogador = 2;
-            slashAnimTimer = 0.3f;
-            stateTime = 0f;
-            saveData.municao--; saveData.inventario.municao = saveData.municao; cooldown = Math.max(0.14f, 0.25f - 0.02f * saveData.inventario.nivelArma);
-            SoundManager.playSound("slash");
-
-            Vector3 m = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
-            camera.unproject(m);
-            slashesJogador.add(new SlashWave(player.x, player.y, m.x, m.y));
+        if (!saveData.inventario.temArma && Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && cooldown <= 0f) {
+            socarTita();
+        } else if (saveData.inventario.temArma && Gdx.input.isButtonPressed(Input.Buttons.LEFT) && saveData.municao > 0 && !isReloading) {
+            chargeTimer = Math.min(1.2f, chargeTimer + delta);
+        } else if (chargeTimer >= 0.8f && saveData.municao > 0 && !isReloading) {
+            dispararTita(true); chargeTimer = 0f;
+        } else if (chargeTimer > 0f && saveData.municao > 0 && !isReloading) {
+            dispararTita(false); chargeTimer = 0f;
         }
+        if (Gdx.input.isKeyJustPressed(Input.Keys.SPACE) && saveData.municao > 0 && cooldown <= 0f && !isReloading) dispararTita(false);
 
         for (int i = slashesJogador.size - 1; i >= 0; i--) {
             SlashWave s = slashesJogador.get(i); s.update(delta);
             if (!s.active) { slashesJogador.removeIndex(i); continue; }
 
             if (boss.ativo && s.rect.overlaps(boss.rect)) {
-                boss.hp -= UpgradeSystem.danoArma(saveData); s.active = false;
+                aplicarDanoBoss(UpgradeSystem.danoArma(saveData) * s.damageMultiplier);
+                s.active = false;
                 SoundManager.playSound("hit_enemy");
-                if (boss.hp <= 0) {
-                    boss.ativo = false;
-                    saveData.bossTitaDerrotado = true;
-                    saveData.inventario.add("CHAVE_TITA");
-                    saveData.fase = "CALISTO";
-                    saveData.salvar();
-                    fadingOut = true; nextScreen = new CallistoScreen(game, saveData);
-                }
+                bossHits++;
                 continue;
             }
 
             for (Enemy m : minions) {
                 if (m.ativo && s.rect.overlaps(m.rect)) {
-                    m.hp -= UpgradeSystem.danoArma(saveData); s.active = false;
+                    m.hp -= UpgradeSystem.danoArma(saveData); s.active = false; SoundManager.playSound("hit_enemy");
                     SoundManager.playSound("hit_enemy");
 
                     if (m.hp <= 0) {
@@ -426,36 +539,67 @@ public class TitanScreen implements Screen {
         }
     }
 
-    private void desenharHUD() {
-        batch.getProjectionMatrix().setToOrtho2D(0, 0, 1280, 720);
-        shapeRenderer.setProjectionMatrix(batch.getProjectionMatrix());
 
-        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
-        shapeRenderer.setColor(0.05f, 0.05f, 0.05f, 0.8f);
-        shapeRenderer.rect(20, 20, 250, 100);
-        shapeRenderer.setColor(0.1f, 0.5f, 0.8f, 1f);
-        shapeRenderer.rect(30, 30, 230 * (Math.max(0, saveData.o2) / 100f), 15);
+    /**
+     * Aplica dano ao Titã e controla o teleporte a cada 100 de dano acumulado.
+     * O contador é zerado somente quando o teleporte acontece.
+     */
+    private void aplicarDanoBoss(float dano) {
+        if (!boss.ativo || dano <= 0f) return;
 
-        if (boss.ativo) {
-            shapeRenderer.setColor(0.2f, 0.2f, 0.2f, 1f); shapeRenderer.rect(440, 680, 400, 20);
-            shapeRenderer.setColor(0.8f, 0.1f, 0.1f, 1f);
-            shapeRenderer.rect(440, 680, 400 * (boss.hp / (float)boss.maxHp), 20);
+        boss.hp -= dano;
+        danoDesdeTeleporte += dano;
+
+        if (boss.hp <= 0f) {
+            boss.ativo = false;
+            saveData.bossTitaDerrotado = true;
+            saveData.inventario.add("CHAVE_TITA");
+            saveData.fase = "CALISTO";
+            saveData.salvar();
+            fadingOut = true;
+            nextScreen = new CallistoScreen(game, saveData);
+            return;
         }
-        shapeRenderer.end();
 
-        batch.begin();
-        font.setColor(1, 1, 1, 1);
-        font.draw(batch, "O2: " + (int)Math.max(0, saveData.o2), 30, 75);
-        font.draw(batch, "MUNICÃO: " + saveData.municao, 30, 95);
-        font.draw(batch, "PLANETA: TITA", 30, 115);
+        // Só teleporta depois de receber 100 de dano desde o último teleporte.
+        if (danoDesdeTeleporte >= 100f) {
+            danoDesdeTeleporte = 0f;
+            boss.rect.x = MathUtils.random(140, 1040);
+            boss.rect.y = MathUtils.random(160, 1040);
+            bossState = 0;
+            bossTimer = 0f;
+            SoundManager.playSound("bossgrowl");
+            mensagemAviso = "O TITÃ SE TELEPORTOU!";
+            avisoTimer = 1.5f;
+        }
+    }
 
-        if (boss.ativo) font.draw(batch, "BESTA DE TITA", 600, 695);
+    private void socarTita() {
+        Vector3 m = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
+        camera.unproject(m);
+        Rectangle hit = PlayerCombat.punchBox(player, m);
+        estadoJogador = 2;
+        slashAnimTimer = .28f;
+        stateTime = 0f;
+        cooldown = .28f;
+        SoundManager.playSound("punch");
 
-        if (isReloading) font.draw(batch, "RECARREGANDO...", 130, 95);
-        if (avisoTimer > 0) font.draw(batch, mensagemAviso, 550, 100);
-        batch.end();
+        if (boss.ativo && hit.overlaps(boss.rect)) {
+            aplicarDanoBoss(8f);
+            bossHits++;
+            SoundManager.playSound("hit_enemy");
+        }
+    }
 
-        dialog.render(batch, shapeRenderer, font);
+    private void dispararTita(boolean charged) {
+        estadoJogador=2; slashAnimTimer=.3f; stateTime=0f; saveData.municao--; saveData.inventario.municao=saveData.municao; cooldown=.18f; SoundManager.playSound(charged ? "charged" : "slash"); Vector3 m=new Vector3(Gdx.input.getX(),Gdx.input.getY(),0); camera.unproject(m); slashesJogador.add(new SlashWave(player.x,player.y,m.x,m.y,charged));
+    }
+
+    private void desenharHUD() {
+        GameHud.drawBoss(shapeRenderer, batch, font, saveData, "TITA",
+            avisoTimer > 0 ? mensagemAviso : "", "BESTA DE TITA",
+            boss.hp, boss.maxHp, 1, 1, boss.ativo);
+        if (!GameHud.isLogAberto()) dialog.render(batch, shapeRenderer, font);
     }
 
     private void desenharFade(float delta) {
@@ -470,6 +614,7 @@ public class TitanScreen implements Screen {
             shapeRenderer.rect(0, 0, 1280, 720);
             shapeRenderer.end();
             Gdx.gl.glDisable(GL20.GL_BLEND);
+            if (!fadingOut && fadeAlpha > 0f) LoadingOverlay.draw(shapeRenderer, stateTime, fadeAlpha);
 
             if (fadingOut && fadeAlpha >= 1.0f && nextScreen != null) {
                 game.setScreen(nextScreen);
@@ -477,12 +622,13 @@ public class TitanScreen implements Screen {
         }
     }
 
-    @Override public void show() {} @Override public void resize(int w, int h) {}
+    @Override public void show() { Gdx.graphics.setSystemCursor(Cursor.SystemCursor.None); SoundManager.playMusic("tita", true); } @Override public void resize(int w, int h) {}
     @Override public void pause() {} @Override public void resume() {}
 
     @Override
-    public void hide() { SoundManager.stopMusic(); }
+    public void hide() { SoundManager.stopMusic(); GameHud.reset(); }
 
     @Override
-    public void dispose() { batch.dispose(); shapeRenderer.dispose(); font.dispose(); }
+    public void dispose() { drone.dispose(); batch.dispose(); shapeRenderer.dispose(); font.dispose(); }
 }
+

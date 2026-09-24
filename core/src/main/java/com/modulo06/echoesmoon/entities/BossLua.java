@@ -11,8 +11,8 @@ public class BossLua {
     public static final int WINDUP = 1;
 
     public final Rectangle rect;
-    public final int maxHp = 120;
-    public int hp = maxHp;
+    public int maxHp;
+    public int hp;
     public final float speed = 105f;
     public boolean ativo = true;
 
@@ -22,7 +22,13 @@ public class BossLua {
     private final Vector2 rockTarget = new Vector2();
 
     public BossLua(float x, float y) {
+        this(x, y, 140);
+    }
+
+    public BossLua(float x, float y, int maxHp) {
         rect = new Rectangle(x, y, 64f, 64f);
+        this.maxHp = Math.max(1, maxHp);
+        this.hp = this.maxHp;
     }
 
     public void update(float delta, Vector2 playerPos) {

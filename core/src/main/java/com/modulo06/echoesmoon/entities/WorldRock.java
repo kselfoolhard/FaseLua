@@ -3,6 +3,7 @@ package com.modulo06.echoesmoon.entities;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.utils.Array;
+import java.util.Random;
 
 /** Rocha estatica que bloqueia o movimento do astronauta. */
 public class WorldRock {
@@ -17,11 +18,20 @@ public class WorldRock {
                                  Rectangle protectedPlayer,
                                  Array<Rectangle> forbiddenAreas,
                                  float minDistanceFromPlayer) {
+        spawnMany(rocks, amount, worldWidth, worldHeight, protectedPlayer, forbiddenAreas, minDistanceFromPlayer, 0x5EEDL);
+    }
+
+    public static void spawnMany(Array<WorldRock> rocks, int amount,
+                                 float worldWidth, float worldHeight,
+                                 Rectangle protectedPlayer,
+                                 Array<Rectangle> forbiddenAreas,
+                                 float minDistanceFromPlayer, long seed) {
+        Random random = new Random(seed);
         int attempts = 0;
-        while (rocks.size < amount && attempts++ < amount * 80) {
-            float size = MathUtils.random(32f, 58f);
-            float x = MathUtils.random(32f, worldWidth - size - 32f);
-            float y = MathUtils.random(32f, worldHeight - size - 32f);
+        while (rocks.size < amount && attempts++ < amount * 100) {
+            float size = 32f + random.nextFloat() * 26f;
+            float x = 32f + random.nextFloat() * Math.max(1f, worldWidth - size - 64f);
+            float y = 32f + random.nextFloat() * Math.max(1f, worldHeight - size - 64f);
             Rectangle candidate = new Rectangle(x, y, size, size);
 
             float dx = candidate.x - protectedPlayer.x;

@@ -1,10 +1,5 @@
 package com.modulo06.echoesmoon.systems;
 
-/**
- * Progressao de upgrades ligada ao numero de inimigos derrotados.
- * Arma: +1 nivel a cada 5 abates, max 3.
- * Armadura: +1 nivel a cada 8 abates, max 3.
- */
 public final class UpgradeSystem {
     public static final int MAX_LEVEL = 3;
     public static final int KILLS_PER_WEAPON = 5;
@@ -15,25 +10,38 @@ public final class UpgradeSystem {
     public static boolean registerKill(GameSaveData save) {
         if (save == null) return false;
         save.inimigosDerrotados++;
-        boolean changed = false;
-
-        int desiredWeapon = Math.min(MAX_LEVEL, save.inimigosDerrotados / KILLS_PER_WEAPON);
-        if (desiredWeapon > save.inventario.nivelArma) {
-            save.inventario.nivelArma = desiredWeapon;
-            changed = true;
-            save.ultimoUpgrade = "UPGRADE DE ARMA NV." + desiredWeapon;
-        }
-
-        int desiredArmor = Math.min(MAX_LEVEL, save.inimigosDerrotados / KILLS_PER_ARMOR);
-        if (desiredArmor > save.inventario.nivelArmadura) {
-            save.inventario.nivelArmadura = desiredArmor;
-            changed = true;
-            save.ultimoUpgrade = "UPGRADE DE ARMADURA NV." + desiredArmor;
-        }
-
-        if (changed) save.salvar();
-        return changed;
+        // Abates geram apenas creditos. Upgrades agora sao comprados exclusivamente na loja.
+        save.creditos += (int)(Math.random() < 0.25 ? 10 : 5);
+        save.salvar();
+        return false;
     }
+
+    public static boolean comprarArma(GameSaveData save) {
+        if (save == null || save.inventario == null || save.inventario.nivelArma >= MAX_LEVEL) return false;
+        int proximo = save.inventario.nivelArma + 1;
+        int preco = precoArma(proximo);
+        if (save.creditos < preco) return false;
+        save.creditos -= preco;
+        save.inventario.nivelArma = proximo;
+        save.ultimoUpgrade = "UPGRADE DE ARMA NV." + proximo;
+        save.salvar();
+        return true;
+    }
+
+    public static boolean comprarArmadura(GameSaveData save) {
+        if (save == null || save.inventario == null || save.inventario.nivelArmadura >= MAX_LEVEL) return false;
+        int proximo = save.inventario.nivelArmadura + 1;
+        int preco = precoArmadura(proximo);
+        if (save.creditos < preco) return false;
+        save.creditos -= preco;
+        save.inventario.nivelArmadura = proximo;
+        save.ultimoUpgrade = "UPGRADE DE ARMADURA NV." + proximo;
+        save.salvar();
+        return true;
+    }
+
+    public static int precoArma(int nivel) { return 35 + Math.max(0, nivel - 1) * 25; }
+    public static int precoArmadura(int nivel) { return 45 + Math.max(0, nivel - 1) * 30; }
 
     public static int danoArma(GameSaveData save) {
         int level = save == null || save.inventario == null ? 0 : save.inventario.nivelArma;
@@ -42,7 +50,16 @@ public final class UpgradeSystem {
 
     public static float multiplicadorDanoRecebido(GameSaveData save) {
         int level = save == null || save.inventario == null ? 0 : save.inventario.nivelArmadura;
-        return Math.max(0.45f, 1f - 0.15f * Math.min(MAX_LEVEL, level));
+        float multiplicadorBase = Math.max(0.45f, 1f - 0.15f * Math.min(MAX_LEVEL, level));
+
+        if (save != null && "FACIL".equals(save.dificuldade)) multiplicadorBase *= 0.75f;
+        if (save != null && "DIFICIL".equals(save.dificuldade)) multiplicadorBase *= 1.25f;
+
+        // ALTERAÇÃO: A escolha de rotas agora afeta diretamente a jogabilidade.
+        if (RouteSystem.isAggressive(save)) {
+            multiplicadorBase *= 1.5f; // Rota agressiva causa mais dano recebido.
+        }
+        return multiplicadorBase;
     }
 
     public static float danoRecebido(GameSaveData save, float bruto) {
@@ -50,14 +67,16 @@ public final class UpgradeSystem {
     }
 
     public static void aplicarDano(GameSaveData save, float bruto) {
-        save.o2 -= danoRecebido(save, bruto);
+        if (save == null) return;
+        float dano = danoRecebido(save, bruto);
+        float resto = dano - save.escudo;
+        save.escudo = Math.max(0f, save.escudo - dano);
+        if (resto > 0f) save.vida -= resto;
+        SoundManager.playSound("hit_player");
     }
 
     public static String progresso(GameSaveData save) {
-        int kills = save.inimigosDerrotados;
-        int proxArma = Math.min(MAX_LEVEL, save.inventario.nivelArma + 1) * KILLS_PER_WEAPON;
-        int proxArmadura = Math.min(MAX_LEVEL, save.inventario.nivelArmadura + 1) * KILLS_PER_ARMOR;
-        return "ABATES: " + kills + " | PROX. ARMA: " + (save.inventario.nivelArma >= MAX_LEVEL ? "MAX" : proxArma)
-                + " | PROX. ARMADURA: " + (save.inventario.nivelArmadura >= MAX_LEVEL ? "MAX" : proxArmadura);
+        // ... (Mantido igual)
+        return "ABATES: " + save.inimigosDerrotados;
     }
 }

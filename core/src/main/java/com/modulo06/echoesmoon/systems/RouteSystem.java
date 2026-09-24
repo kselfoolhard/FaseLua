@@ -48,4 +48,16 @@ public final class RouteSystem {
     public static boolean isActive(GameSaveData save) {
         return save != null && save.rotaEstranha;
     }
+
+    public static boolean isAggressive(GameSaveData save) {
+        return save != null && save.rotaB;
+    }
+
+    /** Quantidade de inimigos para uma onda, maior na rota agressiva. */
+    public static int enemyCount(GameSaveData save, int normal) {
+        int extra = isAggressive(save) ? Math.max(2, normal) : 0;
+        if (save != null && "FACIL".equals(save.dificuldade)) normal = Math.max(1, normal - 2);
+        if (save != null && "DIFICIL".equals(save.dificuldade)) extra += 2;
+        return normal + extra;
+    }
 }

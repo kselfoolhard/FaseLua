@@ -5,6 +5,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Cursor;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Animation;
@@ -29,6 +30,11 @@ import com.modulo06.echoesmoon.systems.SegredoSystem;
 import com.modulo06.echoesmoon.systems.SoundManager;
 import com.modulo06.echoesmoon.systems.UpgradeSystem;
 import com.modulo06.echoesmoon.systems.WorldCollision;
+import com.modulo06.echoesmoon.systems.PlayerCombat;
+import com.modulo06.echoesmoon.systems.GameHud;
+import com.modulo06.echoesmoon.systems.LoadingOverlay;
+import com.modulo06.echoesmoon.systems.RouteSystem;
+import com.modulo06.echoesmoon.systems.RecoverySystems;
 
 public class MarsScreen implements Screen {
     private Game game;
@@ -48,9 +54,11 @@ public class MarsScreen implements Screen {
     private Array<WorldRock> pedras;
     private DialogSystem dialog;
 
-    private Texture fundoTex, slashTex, alienTex, radioTex, portraitRadio, portalTitaTex, o2Tex, foodTex, iceTex;
+    private Texture fundoTex, slashTex, alienTex, radioTex, portraitRadio, portalTitaTex, o2Tex, foodTex, iceTex, pedraTex, corpseTex;
+    private final RecoverySystems.Drone drone = new RecoverySystems.Drone();
 
     private Animation<TextureRegion> animIdle, animWalk, animSlash;
+    private Animation<TextureRegion> animIdleUnarmed, animWalkUnarmed, animPunch;
     private int estadoJogador = 0;
     private float slashAnimTimer = 0f;
     private float timerPasso = 0f;
@@ -64,7 +72,7 @@ public class MarsScreen implements Screen {
     private int totalInimigosNaWave = 5;
 
     private float spawnTimer = 0f, cooldown = 0f;
-    private float reloadTimer = 0f, avisoTimer = 0f;
+    private float reloadTimer = 0f, avisoTimer = 0f, chargeTimer = 0f;
     private String mensagemAviso = "";
     private boolean isReloading = false;
 
@@ -95,11 +103,15 @@ public class MarsScreen implements Screen {
         comidas = new Array<>();
         pedras = new Array<>();
         saveData.sincronizarInventario();
+        drone.ativo = saveData.droneAtivo;
+        drone.loadSprite();
+        if (RouteSystem.isAggressive(saveData)) totalInimigosNaWave = 8;
+        saveData.codex.visitar("MARTE");
+        GameHud.reset();
 
         carregarTexturas();
         spawnAmbientObjects();
-        SoundManager.playMusic("marte", true);
-    }
+            }
 
     private void carregarTexturas() {
         fundoTex = safeLoad("fundo_marte.png");
@@ -111,14 +123,22 @@ public class MarsScreen implements Screen {
         o2Tex = safeLoad("o2.png");
         foodTex = safeLoad("food.png");
         iceTex = safeLoad("ice.png");
+        pedraTex = safeLoad("pedra.png");
+        corpseTex = safeLoad("cadaver.png");
 
         Texture idleTex = safeLoad("player_lunar.png");
         Texture walkTex = safeLoad("player_lunar_walk.png");
         Texture slashTexAnim = safeLoad("player_lunar_slash.png");
+        Texture idleUnarmedTex = safeLoad("player_unarmed.png");
+        Texture walkUnarmedTex = safeLoad("player_unarmed_walk.png");
+        Texture punchTex = safeLoad("player_unarmed_punch.png");
 
-        if (idleTex != null) animIdle = new Animation<>(0.2f, TextureRegion.split(idleTex, idleTex.getWidth() / 4, idleTex.getHeight())[0]);
-        if (walkTex != null) animWalk = new Animation<>(0.12f, TextureRegion.split(walkTex, walkTex.getWidth() / 4, walkTex.getHeight())[0]);
-        if (slashTexAnim != null) animSlash = new Animation<>(0.1f, TextureRegion.split(slashTexAnim, slashTexAnim.getWidth() / 4, slashTexAnim.getHeight())[0]);
+        if (idleTex != null) animIdle = new Animation<>(0.2f, TextureRegion.split(idleTex, Math.max(1, idleTex.getWidth() / 4), idleTex.getHeight())[0]);
+        if (walkTex != null) animWalk = new Animation<>(0.12f, TextureRegion.split(walkTex, Math.max(1, walkTex.getWidth() / 4), walkTex.getHeight())[0]);
+        if (slashTexAnim != null) animSlash = new Animation<>(0.1f, TextureRegion.split(slashTexAnim, Math.max(1, slashTexAnim.getWidth() / 4), slashTexAnim.getHeight())[0]);
+        if (idleUnarmedTex != null) animIdleUnarmed = new Animation<>(0.2f, TextureRegion.split(idleUnarmedTex, Math.max(1, idleUnarmedTex.getWidth() / 4), idleUnarmedTex.getHeight())[0]);
+        if (walkUnarmedTex != null) animWalkUnarmed = new Animation<>(0.12f, TextureRegion.split(walkUnarmedTex, Math.max(1, walkUnarmedTex.getWidth() / 4), walkUnarmedTex.getHeight())[0]);
+        if (punchTex != null) { TextureRegion[][] punchFrames = TextureRegion.split(punchTex, Math.max(1, punchTex.getWidth() / 4), punchTex.getHeight()); animPunch = new Animation<>(0.08f, punchFrames[0][0]); }
     }
 
 
@@ -126,8 +146,7 @@ public class MarsScreen implements Screen {
         Array<Rectangle> forbidden = new Array<>();
         forbidden.add(npcRadio);
         forbidden.add(portalTita);
-        // As pedras do mapa foram removidas: a colisao delas estava ruim e atrapalhava
-        // a movimentacao. O array "pedras" fica vazio de proposito.
+        for (FoodDrop food : comidas) forbidden.add(food.rect);
         for (int i = 0; i < 11; i++) {
             float x = MathUtils.random(80f, 1120f);
             float y = MathUtils.random(80f, 1120f);
@@ -135,6 +154,7 @@ public class MarsScreen implements Screen {
             if (r.overlaps(player) || r.overlaps(npcRadio) || r.overlaps(portalTita)) continue;
             comidas.add(new FoodDrop(x, y));
         }
+        WorldRock.spawnMany(pedras, 18, 1200f, 1200f, player, forbidden, 120f, 202L);
     }
 
     private Texture safeLoad(String path) {
@@ -164,9 +184,11 @@ public class MarsScreen implements Screen {
             batch.draw(iceTex, segredoMarte.x, segredoMarte.y, segredoMarte.width, segredoMarte.height);
             batch.setColor(1f, 1f, 1f, 1f);
         }
+        for (WorldRock rock : pedras) if (pedraTex != null) batch.draw(pedraTex, rock.rect.x, rock.rect.y, rock.rect.width, rock.rect.height);
         for (FoodDrop food : comidas) if (foodTex != null) batch.draw(foodTex, food.rect.x, food.rect.y, food.rect.width, food.rect.height);
         for (ItemDrop d : dropsO2) if (o2Tex != null) batch.draw(o2Tex, d.rect.x, d.rect.y, d.rect.width, d.rect.height);
         for (Enemy e : enemies) if (e.ativo && alienTex != null) batch.draw(alienTex, e.rect.x, e.rect.y, e.rect.width, e.rect.height);
+        drone.draw(batch);
 
         for (SlashWave s : tirosInimigos) {
             if (s.active && slashTex != null) {
@@ -178,15 +200,28 @@ public class MarsScreen implements Screen {
         for (SlashWave s : slashes) if (s.active && slashTex != null) batch.draw(slashTex, s.rect.x, s.rect.y, 24, 24, 48, 48, 1f, 1f, s.angle, 0, 0, slashTex.getWidth(), slashTex.getHeight(), false, false);
 
         TextureRegion frameAtual = null;
-        if (estadoJogador == 2 && animSlash != null) frameAtual = animSlash.getKeyFrame(stateTime, false);
-        else if (estadoJogador == 1 && animWalk != null) frameAtual = animWalk.getKeyFrame(stateTime, true);
-        else if (animIdle != null) frameAtual = animIdle.getKeyFrame(stateTime, true);
+        boolean playerArmado = saveData.inventario != null && saveData.inventario.temArma;
+        if (estadoJogador == 2) {
+            if (playerArmado && animSlash != null) frameAtual = animSlash.getKeyFrame(stateTime, false);
+            else if (!playerArmado && animPunch != null) frameAtual = animPunch.getKeyFrame(stateTime, false);
+            else if (!playerArmado && animIdleUnarmed != null) frameAtual = animIdleUnarmed.getKeyFrame(stateTime, true);
+        } else if (estadoJogador == 1) {
+            if (playerArmado && animWalk != null) frameAtual = animWalk.getKeyFrame(stateTime, true);
+            else if (!playerArmado && animWalkUnarmed != null) frameAtual = animWalkUnarmed.getKeyFrame(stateTime, true);
+        } else {
+            if (playerArmado && animIdle != null) frameAtual = animIdle.getKeyFrame(stateTime, true);
+            else if (!playerArmado && animIdleUnarmed != null) frameAtual = animIdleUnarmed.getKeyFrame(stateTime, true);
+        }
 
-        if (frameAtual != null) batch.draw(frameAtual, player.x, player.y, player.width, player.height);
+        if (frameAtual != null) { batch.setColor(chargeTimer > 0 ? new com.badlogic.gdx.graphics.Color(1f,1f,1f,0.55f+0.45f*(float)Math.abs(Math.sin(stateTime*18f))) : com.badlogic.gdx.graphics.Color.WHITE); batch.draw(frameAtual, player.x, player.y, player.width, player.height); batch.setColor(com.badlogic.gdx.graphics.Color.WHITE); }
+        if (saveData.cadaverAtivo && corpseTex != null) batch.draw(corpseTex, saveData.cadaverX, saveData.cadaverY, 40, 40);
 
         if (player.overlaps(npcRadio) && !wavesIniciadas && !dialog.isOpen()) font.draw(batch, "[E] LIGAR RADIO", npcRadio.x - 20, npcRadio.y + 80);
         if (player.overlaps(portalTita) && titaLiberado) font.draw(batch, "[E] IR PARA TITA", portalTita.x, portalTita.y - 20);
         batch.end();
+        shapeRenderer.setProjectionMatrix(camera.combined);
+        drone.drawBeam(shapeRenderer);
+        PlayerCombat.drawChargeParticles(shapeRenderer, player, chargeTimer, stateTime);
 
         shapeRenderer.setProjectionMatrix(camera.combined);
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
@@ -205,7 +240,7 @@ public class MarsScreen implements Screen {
 
         // --- SISTEMA DE INVENTARIO: RENDERIZA POR CIMA DE TUDO ---
         if (saveData.inventario != null && saveData.inventario.aberto) {
-            saveData.inventario.render(batch, font, batch.getProjectionMatrix(), saveData);
+            saveData.inventario.render(batch, shapeRenderer, font, batch.getProjectionMatrix(), saveData);
         }
 
         CrosshairUtil.desenharMira(shapeRenderer);
@@ -216,22 +251,27 @@ public class MarsScreen implements Screen {
 
         // --- CONTROLE DO INVENTÁRIO & PAUSA ---
         if (saveData.inventario != null) {
-            if (Gdx.input.isKeyJustPressed(Input.Keys.I)) {
-                saveData.inventario.aberto = !saveData.inventario.aberto;
-            }
+            if (Gdx.input.isKeyJustPressed(Input.Keys.I)) saveData.inventario.aberto = !saveData.inventario.aberto;
             if (saveData.inventario.aberto) {
-                if (Gdx.input.isKeyJustPressed(Input.Keys.C)) {
-                    saveData.inventario.usarComida(saveData);
-                }
-                return; // PAUSA O JOGO AQUI
+                if (Gdx.input.isKeyJustPressed(Input.Keys.C)) saveData.inventario.usarComida(saveData);
+                return;
             }
         }
+        if (GameHud.handleInput(saveData)) return;
+        if (Gdx.input.isKeyJustPressed(Input.Keys.C) && saveData.inventario.drone > 0) { drone.ativo = !drone.ativo; saveData.droneAtivo = drone.ativo; saveData.salvar(); }
+        if (saveData.cadaverAtivo && player.overlaps(new Rectangle(saveData.cadaverX, saveData.cadaverY, 50, 50)) && Gdx.input.isKeyJustPressed(Input.Keys.E)) {
+            RecoverySystems.recuperarCadaver(saveData);
+            mensagemAviso = "CADAVER RECUPERADO"; avisoTimer = 2.5f;
+            return;
+        }
+
+
 
         if (somEnemyTimer > 0f) somEnemyTimer -= delta;
         if (cooldown > 0f) cooldown -= delta;
         if (avisoTimer > 0f) avisoTimer -= delta;
-        saveData.o2 -= 0.5f * delta;
-        if (saveData.o2 <= 0) game.setScreen(new GameOverScreen(game));
+        RecoverySystems.updateOxygen(saveData, delta, 0.5f);
+        if (saveData.vida <= 0) { RecoverySystems.criarCadaver(saveData, player.x, player.y); saveData.fase = "MARTE"; saveData.salvar(); game.setScreen(new GameOverScreen(game)); return; }
 
         if (dialog.isOpen()) {
             if (Gdx.input.isKeyJustPressed(Input.Keys.E) || Gdx.input.isKeyJustPressed(Input.Keys.ENTER)) {
@@ -269,7 +309,7 @@ public class MarsScreen implements Screen {
             }
         }
 
-        if (Gdx.input.isKeyJustPressed(Input.Keys.R) && !isReloading && saveData.municao < 25) {
+        if (saveData.inventario.temArma && Gdx.input.isKeyJustPressed(Input.Keys.R) && !isReloading && saveData.municao < 25) {
             isReloading = true; reloadTimer = 1.5f; mensagemAviso = "RECARREGANDO..."; avisoTimer = 1.5f;
             SoundManager.playSound("reload");
         }
@@ -340,33 +380,33 @@ public class MarsScreen implements Screen {
                 spawnTimer = 0f;
             }
             if (inimigosMortosNaWave >= totalInimigosNaWave) {
-                waveState++; inimigosMortosNaWave = 0; totalInimigosNaWave += 3;
+                waveState++; inimigosMortosNaWave = 0; totalInimigosNaWave += RouteSystem.isAggressive(saveData) ? 5 : 3;
                 if (waveState > 3) {
                     titaLiberado = true;
                     saveData.marteMissoesOk = true;
                     saveData.fase = "MARTE_BOSS";
                     saveData.salvar();
-                    SoundManager.playMusic("marte", true);
-                }
+                                    }
             }
         }
 
-        if ((Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) || Gdx.input.isKeyJustPressed(Input.Keys.SPACE)) && saveData.municao > 0 && cooldown <= 0f && !isReloading) {
-            estadoJogador = 2;
-            slashAnimTimer = 0.3f;
-            stateTime = 0f;
-            saveData.municao--; saveData.inventario.municao = saveData.municao; cooldown = Math.max(0.14f, 0.25f - 0.02f * saveData.inventario.nivelArma);
-            SoundManager.playSound("slash");
-            Vector3 m = new Vector3(Gdx.input.getX(), Gdx.input.getY(), 0);
-            camera.unproject(m); slashes.add(new SlashWave(player.x, player.y, m.x, m.y));
+        if (!saveData.inventario.temArma && Gdx.input.isButtonJustPressed(Input.Buttons.LEFT) && cooldown <= 0f) {
+            socarMars();
+        } else if (saveData.inventario.temArma && Gdx.input.isButtonPressed(Input.Buttons.LEFT) && saveData.municao > 0 && !isReloading) {
+            chargeTimer = Math.min(1.2f, chargeTimer + delta);
+        } else if (saveData.inventario.temArma && chargeTimer >= 0.8f && saveData.municao > 0 && !isReloading) {
+            dispararMars(true); chargeTimer = 0f;
+        } else if (saveData.inventario.temArma && chargeTimer > 0f && saveData.municao > 0 && !isReloading) {
+            dispararMars(false); chargeTimer = 0f;
         }
+        if (saveData.inventario.temArma && Gdx.input.isKeyJustPressed(Input.Keys.SPACE) && saveData.municao > 0 && cooldown <= 0f && !isReloading) dispararMars(false);
 
         for (int i = slashes.size - 1; i >= 0; i--) {
             SlashWave s = slashes.get(i); s.update(delta);
             if (!s.active) { slashes.removeIndex(i); continue; }
             for (Enemy e : enemies) {
                 if (e.ativo && s.rect.overlaps(e.rect)) {
-                    e.hp -= UpgradeSystem.danoArma(saveData); s.active = false;
+                    e.hp -= UpgradeSystem.danoArma(saveData); s.active = false; SoundManager.playSound("hit_enemy");
                     if (e.hp <= 0) {
                         e.ativo = false; inimigosMortosNaWave++;
                         if (UpgradeSystem.registerKill(saveData)) { mensagemAviso = saveData.ultimoUpgrade; avisoTimer = 2.5f; }
@@ -390,6 +430,19 @@ public class MarsScreen implements Screen {
             } else enemies.removeIndex(i);
         }
 
+        Enemy alvoDrone = RecoverySystems.nearestEnemy(enemies, player.x, player.y);
+        if (drone.ativo) {
+            boolean disparouDrone = drone.assist(delta, player.x, player.y, saveData,
+                    alvoDrone != null ? alvoDrone.rect.x : player.x,
+                    alvoDrone != null ? alvoDrone.rect.y : player.y,
+                    alvoDrone != null);
+            if (disparouDrone && alvoDrone != null) {
+                alvoDrone.hp -= Math.max(4f, UpgradeSystem.danoArma(saveData) * 0.45f);
+                SoundManager.playSound("hit_enemy");
+                if (alvoDrone.hp <= 0) { alvoDrone.ativo = false; UpgradeSystem.registerKill(saveData); }
+            }
+        }
+
         for (int i = tirosInimigos.size - 1; i >= 0; i--) {
             SlashWave s = tirosInimigos.get(i); s.update(delta);
             if (s.rect.overlaps(player)) { UpgradeSystem.aplicarDano(saveData, 10f); s.active = false; }
@@ -403,39 +456,12 @@ public class MarsScreen implements Screen {
         }
     }
 
+    private void dispararMars(boolean charged) { estadoJogador=2; slashAnimTimer=.3f; stateTime=0f; saveData.municao--; saveData.inventario.municao=saveData.municao; cooldown=Math.max(.14f,.25f-.02f*saveData.inventario.nivelArma); SoundManager.playSound(charged ? "charged" : "slash"); Vector3 m=new Vector3(Gdx.input.getX(),Gdx.input.getY(),0); camera.unproject(m); slashes.add(new SlashWave(player.x,player.y,m.x,m.y,charged)); }
+
     private void desenharHUD() {
-        batch.getProjectionMatrix().setToOrtho2D(0, 0, 1280, 720);
-        shapeRenderer.setProjectionMatrix(batch.getProjectionMatrix());
-
-        shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
-        shapeRenderer.setColor(0.05f, 0.05f, 0.05f, 0.8f);
-        shapeRenderer.rect(20, 20, 250, 100);
-        shapeRenderer.setColor(0.1f, 0.5f, 0.8f, 1f);
-        shapeRenderer.rect(30, 30, 230 * (Math.max(0, saveData.o2) / 100f), 15);
-
-        if (wavesIniciadas && waveState <= 3) {
-            shapeRenderer.setColor(0.2f, 0.2f, 0.2f, 1f); shapeRenderer.rect(440, 680, 400, 20);
-            shapeRenderer.setColor(0.8f, 0.1f, 0.1f, 1f);
-            shapeRenderer.rect(440, 680, 400 * ((float) inimigosMortosNaWave / totalInimigosNaWave), 20);
-        }
-        shapeRenderer.end();
-
-        batch.begin();
-        font.setColor(1, 1, 1, 1);
-        font.draw(batch, "O2: " + (int)Math.max(0, saveData.o2), 30, 75);
-        font.draw(batch, "MUNICÃO: " + saveData.municao, 30, 95);
-        font.draw(batch, "PLANETA: MARTE", 30, 115);
-
-        font.draw(batch, "[TAB] Ocultar Quest | [I] Inventario | [F5] Salvar Checkpoint | [R] Recarregar", 20, 715);
-
-        if (isReloading) font.draw(batch, "RECARREGANDO...", 130, 95);
-        if (avisoTimer > 0) font.draw(batch, mensagemAviso, 550, 100);
-
-        if (wavesIniciadas && waveState <= 3) font.draw(batch, "ONDA " + waveState + " - INIMIGOS RESTANTES: " + (totalInimigosNaWave - inimigosMortosNaWave), 450, 670);
-        else if (titaLiberado) font.draw(batch, "SISTEMA SEGURO. PORTAL LIBERADO.", 500, 690);
-        batch.end();
-
-        dialog.render(batch, shapeRenderer, font);
+        GameHud.draw(shapeRenderer, batch, font, saveData, "MARTE",
+                avisoTimer > 0 ? mensagemAviso : "");
+        if (!GameHud.isLogAberto()) dialog.render(batch, shapeRenderer, font);
     }
 
     private void desenharFade(float delta) {
@@ -450,6 +476,7 @@ public class MarsScreen implements Screen {
             shapeRenderer.rect(0, 0, 1280, 720);
             shapeRenderer.end();
             Gdx.gl.glDisable(GL20.GL_BLEND);
+            if (!fadingOut && fadeAlpha > 0f) LoadingOverlay.draw(shapeRenderer, stateTime, fadeAlpha);
 
             if (fadingOut && fadeAlpha >= 1.0f && nextScreen != null) {
                 game.setScreen(nextScreen);
@@ -457,6 +484,20 @@ public class MarsScreen implements Screen {
         }
     }
 
-    @Override public void show() {} @Override public void resize(int w, int h) {}
-    @Override public void pause() {} @Override public void resume() {} @Override public void hide() {} @Override public void dispose() {}
+
+    private void socarMars() {
+        Vector3 m=new Vector3(Gdx.input.getX(),Gdx.input.getY(),0); camera.unproject(m);
+        Rectangle hit=PlayerCombat.punchBox(player,m);
+        estadoJogador=2; slashAnimTimer=.28f; stateTime=0f; cooldown=.28f; SoundManager.playSound("punch");
+        for (Enemy e : enemies) {
+            if (e.ativo && hit.overlaps(e.rect)) {
+                e.hp -= 8f; SoundManager.playSound("hit_enemy");
+                if (e.hp <= 0) { e.ativo=false; if (UpgradeSystem.registerKill(saveData)) { mensagemAviso=saveData.ultimoUpgrade; avisoTimer=2.5f; } }
+                break;
+            }
+        }
+    }
+
+    @Override public void show() { Gdx.graphics.setSystemCursor(Cursor.SystemCursor.None); SoundManager.playMusic("marte", true); } @Override public void resize(int w, int h) {}
+    @Override public void pause() {} @Override public void resume() {} @Override public void hide() {} @Override public void dispose() { drone.dispose(); }
 }
